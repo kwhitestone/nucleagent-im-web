@@ -96,7 +96,7 @@ export function configureSDK(session: ConnectSession): WKSDK {
     return info;
   };
   config.provider.syncMessagesCallback = async (channel: Channel, options: SyncOptions) => {
-    const result = await postIM<unknown>("/channel/messagesync", {
+    const result = await postIM<unknown>("/api/v1/im/channel/messagesync", {
       channel_id: channel.channelID,
       channel_type: channel.channelType,
       start_message_seq: options.startMessageSeq,
@@ -108,7 +108,7 @@ export function configureSDK(session: ConnectSession): WKSDK {
     return rows(result, "messages").map((row) => messageFromRow(row, channel));
   };
   config.provider.syncConversationsCallback = async () => {
-    const result = await postIM<unknown>("/conversation/list", { limit: 200 }, session);
+    const result = await postIM<unknown>("/api/v1/im/conversation/list", { limit: 200 }, session);
     return rows(result, "conversations").map(conversationFromRow);
   };
   sdk.config = config;

@@ -83,11 +83,7 @@ export async function postIM<T>(
       "Content-Type": "application/json",
       token: session.token,
     },
-    body: JSON.stringify({
-      ...body,
-      uid: session.uid,
-      login_uid: session.uid,
-    }),
+    body: JSON.stringify(body),
   });
   const data = await readJson(response) as T | Envelope<T>;
   if (!response.ok) {
