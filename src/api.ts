@@ -124,6 +124,43 @@ export async function createSession(username: string, password: string): Promise
   return { ...connect, jwt: login.accessToken };
 }
 
+// The SSE stream authenticates with the Auth access token, whose TTL is 15 minutes.
+// Rotating it needs the HttpOnly refresh cookie, then a fresh IM connect token so the
+// wsAddr/token pair stays consistent with the new JWT.
+export async function refreshSession(): Promise<ConnectSession> {
+  const refreshResponse = await fetch(`${authBase}/api/v1/addons/auth/refresh-token`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Refresh-Cookie-Only": "1",
+      "X-Refresh-Request-ID": refreshRequestId(),
+    },
+    body: "{}",
+  });
+  const login = await readEnvelope<LoginData>(refreshResponse);
+  if (!login.accessToken) throw new Error("Refresh response did not include accessToken");
+
+  const connectResponse = await fetch(`${imBase}/api/v1/im/connect-token`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${login.accessToken}`,
+    },
+  });
+  const connect = await readEnvelope<ConnectData>(connectResponse);
+  if (!connect.uid || !connect.token || !connect.wsAddr) {
+    throw new Error("IM response must include uid, token, and wsAddr");
+  }
+  return { ...connect, jwt: login.accessToken };
+}
+
+// The server requires a 16-128 character request identifier in cookie-only mode.
+function refreshRequestId(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export async function postIM<T>(
   path: string,
   body: Record<string, unknown>,
