@@ -17,9 +17,28 @@ import {
   type WKEventListener,
   WKSDK,
 } from "wukongimjssdk";
-import { createSession, type ConnectSession } from "./api";
+import {
+  createSession,
+  getGroupMembers,
+  imBase,
+  listGroups,
+  type ConnectSession,
+  type Contact,
+  type GroupMember,
+  type IMGroup,
+} from "./api";
+import ContactPicker from "./components/ContactPicker.vue";
+import GroupDialog from "./components/GroupDialog.vue";
 import { configureSDK } from "./im";
-import { parseStreamEvent } from "./stream";
+import { buildOutgoingText } from "./mentions";
+import {
+  applyAgentStreamEvent,
+  browserStreamChannelId,
+  connectAgentStream,
+  parseStreamEvent,
+  reconcileLiveResponses,
+  type LiveAgentResponse,
+} from "./stream";
 
 const username = ref("");
 const password = ref("");
@@ -28,25 +47,57 @@ const loggingIn = ref(false);
 const session = ref<ConnectSession>();
 const connection = ref("Disconnected");
 const conversations = shallowRef<Conversation[]>([]);
+const groups = ref<IMGroup[]>([]);
+const knownContacts = ref<Contact[]>([]);
 const activeChannel = ref<Channel>();
+const activeGroupMembers = ref<GroupMember[]>([]);
 const messages = shallowRef<Message[]>([]);
-const channelID = ref("");
-const channelType = ref(ChannelTypePerson);
+const liveResponses = ref<LiveAgentResponse[]>([]);
+const streamConnection = ref<"connected" | "reconnecting">("connected");
 const draft = ref("");
+const mentionedAgentUids = ref<string[]>([]);
 const loadingHistory = ref(false);
 const historyFinished = ref(false);
 const chatElement = ref<HTMLElement>();
+const groupDialogOpen = ref(false);
+const dialogGroup = ref<IMGroup>();
 let viewGeneration = 0;
 let listenersInstalled = false;
+let streamAbort: AbortController | undefined;
 
+const activeGroup = computed(() =>
+  activeChannel.value?.channelType === ChannelTypeGroup
+    ? groups.value.find((group) => group.wukongChannelId === activeChannel.value?.channelID)
+    : undefined,
+);
+const activeAgents = computed(() =>
+  activeGroupMembers.value.filter((member) => member.accountType === "agent"),
+);
 const activeTitle = computed(() => {
-  if (!activeChannel.value) return "Select or open a conversation";
-  return `${activeChannel.value.channelType === ChannelTypeGroup ? "Group" : "Direct"} · ${activeChannel.value.channelID}`;
+  const channel = activeChannel.value;
+  if (!channel) return "Select or open a conversation";
+  if (channel.channelType === ChannelTypeGroup) {
+    return activeGroup.value?.title || `Group ${channel.channelID}`;
+  }
+  const contact = knownContacts.value.find((item) => String(item.id) === channel.channelID);
+  return contact?.displayName || contact?.username || `Direct ${channel.channelID}`;
 });
-
 const sortedConversations = computed(() =>
   [...conversations.value].sort((left, right) => right.timestamp - left.timestamp),
 );
+const busy = computed(() => liveResponses.value.some((response) => response.status === "busy"));
+const mentionQuery = computed(() => {
+  if (activeChannel.value?.channelType !== ChannelTypeGroup) return null;
+  const match = draft.value.match(/(?:^|\s)@([^@\s]*)$/);
+  return match ? match[1].toLocaleLowerCase() : null;
+});
+const mentionSuggestions = computed(() => {
+  if (mentionQuery.value === null) return [];
+  return activeAgents.value.filter((agent) => {
+    const name = `${agent.displayName} ${agent.username}`.toLocaleLowerCase();
+    return name.includes(mentionQuery.value!);
+  });
+});
 
 function channelKey(channel: Channel): string {
   return `${channel.channelType}:${channel.channelID}`;
@@ -75,6 +126,29 @@ function isOwnMessage(message: Message): boolean {
   return message.fromUID === session.value?.uid || message.send;
 }
 
+function conversationTitle(conversation: Conversation): string {
+  const channel = conversation.channel;
+  if (channel.channelType === ChannelTypeGroup) {
+    return groups.value.find((group) => group.wukongChannelId === channel.channelID)?.title
+      || channel.channelID;
+  }
+  const contact = knownContacts.value.find((item) => String(item.id) === channel.channelID);
+  return contact?.displayName || contact?.username || channel.channelID;
+}
+
+function agentName(uid: string): string {
+  const member = activeGroupMembers.value.find((item) => String(item.uid) === uid);
+  const contact = knownContacts.value.find((item) => String(item.id) === uid);
+  return member?.displayName || member?.username || contact?.displayName || contact?.username || "Agent";
+}
+
+function rememberContact(contact: Contact): void {
+  knownContacts.value = [
+    contact,
+    ...knownContacts.value.filter((item) => item.id !== contact.id),
+  ];
+}
+
 function scrollToBottom(): void {
   nextTick(() => {
     if (chatElement.value) chatElement.value.scrollTop = chatElement.value.scrollHeight;
@@ -89,6 +163,13 @@ function mergeMessages(current: Message[], incoming: Message[]): Message[] {
   );
 }
 
+function reconcileResponses(): void {
+  liveResponses.value = reconcileLiveResponses(
+    liveResponses.value,
+    messages.value.map((message) => message.clientMsgNo).filter(Boolean),
+  );
+}
+
 function upsertConversation(conversation: Conversation): void {
   const key = channelKey(conversation.channel);
   conversations.value = [
@@ -100,7 +181,7 @@ function upsertConversation(conversation: Conversation): void {
 const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
   if (status === ConnectStatus.Connected) {
     connection.value = "Connected";
-    void syncConversations();
+    void Promise.all([syncConversations(), syncGroups()]);
   } else if (status === ConnectStatus.Connecting) {
     connection.value = "Connecting";
   } else if (status === ConnectStatus.ConnectFail && reasonCode === 2) {
@@ -122,6 +203,7 @@ const conversationListener: ConversationListener = (conversation, action) => {
 const messageListener: MessageListener = (message) => {
   if (activeChannel.value?.isEqual(message.channel)) {
     messages.value = mergeMessages(messages.value, [message]);
+    reconcileResponses();
     scrollToBottom();
   }
 };
@@ -208,16 +290,76 @@ async function syncConversations(): Promise<void> {
   }
 }
 
+async function syncGroups(): Promise<void> {
+  if (!session.value) return;
+  try {
+    groups.value = await listGroups(session.value);
+    const channel = activeChannel.value;
+    const group = groups.value.find((item) => item.wukongChannelId === channel?.channelID);
+    if (channel?.channelType === ChannelTypeGroup && group && !activeGroupMembers.value.length) {
+      await loadActiveGroupMembers(group, viewGeneration);
+    }
+  } catch (error) {
+    loginError.value = error instanceof Error ? error.message : "Groups could not be loaded";
+  }
+}
+
+async function loadActiveGroupMembers(group: IMGroup, generation: number): Promise<void> {
+  if (!session.value) return;
+  try {
+    const data = await getGroupMembers(group.id, session.value);
+    if (generation === viewGeneration) activeGroupMembers.value = data.members;
+  } catch (error) {
+    if (generation === viewGeneration) {
+      loginError.value = error instanceof Error ? error.message : "Group members could not be loaded";
+    }
+  }
+}
+
+function startAgentStream(channel: Channel, generation: number): void {
+  streamAbort?.abort();
+  liveResponses.value = [];
+  streamConnection.value = "connected";
+  if (!session.value) return;
+
+  streamAbort = new AbortController();
+  void connectAgentStream({
+    baseUrl: imBase,
+    channelId: browserStreamChannelId(channel.channelID, channel.channelType, session.value.uid),
+    channelType: channel.channelType,
+    jwt: session.value.jwt,
+    signal: streamAbort.signal,
+    onConnectionChange(state) {
+      if (generation === viewGeneration) streamConnection.value = state;
+    },
+    onEvent(event) {
+      if (generation !== viewGeneration) return;
+      liveResponses.value = applyAgentStreamEvent(liveResponses.value, event);
+      reconcileResponses();
+      scrollToBottom();
+    },
+  });
+}
+
 async function openChannel(channel: Channel): Promise<void> {
   viewGeneration += 1;
   const generation = viewGeneration;
   activeChannel.value = channel;
+  activeGroupMembers.value = [];
   messages.value = [];
+  draft.value = "";
+  mentionedAgentUids.value = [];
   historyFinished.value = false;
   loadingHistory.value = true;
+  startAgentStream(channel, generation);
   WKSDK.shared().conversationManager.openConversation =
-    WKSDK.shared().conversationManager.findConversation(channel) ||
-    WKSDK.shared().conversationManager.createEmptyConversation(channel);
+    WKSDK.shared().conversationManager.findConversation(channel)
+    || WKSDK.shared().conversationManager.createEmptyConversation(channel);
+
+  const group = groups.value.find((item) => item.wukongChannelId === channel.channelID);
+  if (channel.channelType === ChannelTypeGroup && group) {
+    void loadActiveGroupMembers(group, generation);
+  }
 
   try {
     const history = await WKSDK.shared().chatManager.syncMessages(channel, {
@@ -228,6 +370,7 @@ async function openChannel(channel: Channel): Promise<void> {
     });
     if (generation !== viewGeneration) return;
     messages.value = mergeMessages([], history);
+    reconcileResponses();
     historyFinished.value = history.length < 30;
     scrollToBottom();
   } catch (error) {
@@ -239,11 +382,13 @@ async function openChannel(channel: Channel): Promise<void> {
   }
 }
 
-function openTypedChannel(): void {
-  const id = channelID.value.trim();
-  if (!id) return;
-  void openChannel(new Channel(id, channelType.value));
-  channelID.value = "";
+function openContact(contact: Contact): void {
+  rememberContact(contact);
+  void openChannel(new Channel(String(contact.id), ChannelTypePerson));
+}
+
+function openGroup(group: IMGroup): void {
+  void openChannel(new Channel(group.wukongChannelId, ChannelTypeGroup));
 }
 
 async function loadEarlier(): Promise<void> {
@@ -262,6 +407,7 @@ async function loadEarlier(): Promise<void> {
     });
     if (generation !== viewGeneration) return;
     messages.value = mergeMessages(history, messages.value);
+    reconcileResponses();
     historyFinished.value = history.length < 30 || first.messageSeq <= 1;
   } catch (error) {
     loginError.value = error instanceof Error ? error.message : "Message history failed";
@@ -270,31 +416,89 @@ async function loadEarlier(): Promise<void> {
   }
 }
 
+function insertMention(agent: GroupMember): void {
+  const name = agent.displayName || agent.username;
+  draft.value = draft.value.replace(/@[^@\s]*$/, `@${name} `);
+  const uid = String(agent.uid);
+  if (!mentionedAgentUids.value.includes(uid)) {
+    mentionedAgentUids.value = [...mentionedAgentUids.value, uid];
+  }
+}
+
+function removeMention(uid: string): void {
+  mentionedAgentUids.value = mentionedAgentUids.value.filter((item) => item !== uid);
+}
+
 async function sendMessage(): Promise<void> {
   const text = draft.value.trim();
   const channel = activeChannel.value;
   if (!text || !channel || connection.value !== "Connected") return;
 
+  const mentionUids = mentionedAgentUids.value;
   draft.value = "";
+  mentionedAgentUids.value = [];
   try {
-    const message = await WKSDK.shared().chatManager.send(new MessageText(text), channel);
+    const content = buildOutgoingText(text, channel.channelType, mentionUids);
+    const message = await WKSDK.shared().chatManager.send(content, channel);
     messages.value = mergeMessages(messages.value, [message]);
     scrollToBottom();
   } catch (error) {
     draft.value = text;
+    mentionedAgentUids.value = mentionUids;
     loginError.value = error instanceof Error ? error.message : "Message send failed";
   }
 }
 
+function showCreateGroup(): void {
+  dialogGroup.value = undefined;
+  groupDialogOpen.value = true;
+}
+
+function showGroupDetails(): void {
+  if (!activeGroup.value) return;
+  dialogGroup.value = activeGroup.value;
+  groupDialogOpen.value = true;
+}
+
+function groupCreated(group: IMGroup): void {
+  groups.value = [group, ...groups.value.filter((item) => item.id !== group.id)];
+  groupDialogOpen.value = false;
+  openGroup(group);
+}
+
+function groupRemoved(group: IMGroup): void {
+  groups.value = groups.value.filter((item) => item.id !== group.id);
+  groupDialogOpen.value = false;
+  if (activeChannel.value?.channelID === group.wukongChannelId) {
+    viewGeneration += 1;
+    streamAbort?.abort();
+    WKSDK.shared().conversationManager.openConversation = undefined;
+    activeChannel.value = undefined;
+    messages.value = [];
+    liveResponses.value = [];
+  }
+}
+
+async function groupChanged(): Promise<void> {
+  await syncGroups();
+  const group = activeGroup.value;
+  if (group) await loadActiveGroupMembers(group, viewGeneration);
+}
+
 function logout(): void {
   viewGeneration += 1;
+  streamAbort?.abort();
   removeListeners();
   WKSDK.shared().disconnect();
   WKSDK.shared().conversationManager.openConversation = undefined;
   session.value = undefined;
   conversations.value = [];
+  groups.value = [];
+  knownContacts.value = [];
   activeChannel.value = undefined;
+  activeGroupMembers.value = [];
   messages.value = [];
+  liveResponses.value = [];
   password.value = "";
   connection.value = "Disconnected";
   loginError.value = "";
@@ -336,47 +540,72 @@ onBeforeUnmount(logout);
         <button class="quiet" type="button" @click="logout">Log out</button>
       </header>
 
-      <form class="channel-form" @submit.prevent="openTypedChannel">
-        <input v-model="channelID" aria-label="Channel ID" placeholder="User or group ID" required>
-        <select v-model.number="channelType" aria-label="Conversation type">
-          <option :value="ChannelTypePerson">Direct</option>
-          <option :value="ChannelTypeGroup">Group</option>
-        </select>
-        <button class="primary" type="submit">Open</button>
-      </form>
-
-      <div class="conversation-list">
-        <button
-          v-for="conversation in sortedConversations"
-          :key="channelKey(conversation.channel)"
-          class="conversation"
-          :class="{ active: activeChannel?.isEqual(conversation.channel) }"
-          type="button"
-          @click="openChannel(conversation.channel)"
-        >
-          <span class="avatar">{{ conversation.channel.channelType === ChannelTypeGroup ? "#" : "@" }}</span>
-          <span class="conversation-copy">
-            <strong>{{ conversation.channel.channelID }}</strong>
-            <small>{{ messageText(conversation.lastMessage) || "No messages yet" }}</small>
-          </span>
-          <span v-if="conversation.unread" class="unread">{{ conversation.unread }}</span>
-        </button>
-        <p v-if="!sortedConversations.length" class="empty-list">No recent conversations</p>
+      <div class="sidebar-tools">
+        <ContactPicker :session="session" @select="openContact" />
+        <button class="quiet new-group" type="button" @click="showCreateGroup">New group</button>
       </div>
+
+      <nav class="conversation-list" aria-label="Conversations">
+        <section v-if="groups.length" class="sidebar-section">
+          <h2>Groups</h2>
+          <button
+            v-for="group in groups"
+            :key="group.id"
+            class="conversation"
+            :class="{ active: activeChannel?.channelID === group.wukongChannelId }"
+            type="button"
+            @click="openGroup(group)"
+          >
+            <span class="avatar">#</span>
+            <span class="conversation-copy">
+              <strong>{{ group.title }}</strong>
+              <small>Group chat</small>
+            </span>
+          </button>
+        </section>
+
+        <section class="sidebar-section">
+          <h2>Recent</h2>
+          <button
+            v-for="conversation in sortedConversations"
+            :key="channelKey(conversation.channel)"
+            class="conversation"
+            :class="{ active: activeChannel?.isEqual(conversation.channel) }"
+            type="button"
+            @click="openChannel(conversation.channel)"
+          >
+            <span class="avatar">{{ conversation.channel.channelType === ChannelTypeGroup ? "#" : "@" }}</span>
+            <span class="conversation-copy">
+              <strong>{{ conversationTitle(conversation) }}</strong>
+              <small>{{ messageText(conversation.lastMessage) || "No messages yet" }}</small>
+            </span>
+            <span v-if="conversation.unread" class="unread">{{ conversation.unread }}</span>
+          </button>
+          <p v-if="!sortedConversations.length" class="empty-list">No recent conversations</p>
+        </section>
+      </nav>
     </aside>
 
     <section class="chat">
       <header class="chat-header">
         <div>
           <h2>{{ activeTitle }}</h2>
-          <span v-if="activeChannel">{{ activeChannel.channelType === ChannelTypeGroup ? "Group chat" : "Direct message" }}</span>
+          <span v-if="activeChannel">
+            {{ activeChannel.channelType === ChannelTypeGroup ? "Group chat" : "Direct message" }}
+          </span>
+        </div>
+        <div class="chat-actions">
+          <span v-if="busy" class="busy-chip">Agent responding</span>
+          <button v-if="activeGroup" class="quiet" type="button" @click="showGroupDetails">
+            Members
+          </button>
         </div>
       </header>
 
       <div v-if="!activeChannel" class="empty-chat">
         <div class="empty-icon">@</div>
         <h2>Open a conversation</h2>
-        <p>Choose a recent chat or enter a user or group ID.</p>
+        <p>Search for a person or agent, or choose a group.</p>
       </div>
 
       <template v-else>
@@ -391,7 +620,7 @@ onBeforeUnmount(logout);
             {{ loadingHistory ? "Loading..." : "Load earlier messages" }}
           </button>
           <p v-if="loadingHistory && !messages.length" class="loading">Loading messages...</p>
-          <p v-else-if="!messages.length" class="loading">No messages yet</p>
+          <p v-else-if="!messages.length && !liveResponses.length" class="loading">No messages yet</p>
           <article
             v-for="message in messages"
             :key="messageKey(message)"
@@ -402,16 +631,54 @@ onBeforeUnmount(logout);
             <div class="bubble">{{ messageText(message) }}</div>
             <time>{{ messageTime(message) }}</time>
           </article>
+          <template v-for="response in liveResponses" :key="response.sourceKey">
+            <p v-if="response.status === 'error'" class="stream-error" role="status">
+              Response failed. Please try again later.
+            </p>
+            <article v-else class="message streaming">
+              <span class="sender">{{ agentName(response.agentUid) }}</span>
+              <div class="bubble">{{ response.text || "..." }}</div>
+            </article>
+          </template>
+          <p v-if="streamConnection === 'reconnecting'" class="stream-state" role="status">
+            Reconnecting live response...
+          </p>
         </div>
 
         <form class="composer" @submit.prevent="sendMessage">
-          <textarea
-            v-model="draft"
-            aria-label="Message"
-            placeholder="Write a message"
-            rows="2"
-            @keydown.enter.exact.prevent="sendMessage"
-          />
+          <div class="composer-input">
+            <div v-if="mentionedAgentUids.length" class="mention-chips">
+              <button
+                v-for="uid in mentionedAgentUids"
+                :key="uid"
+                class="selection"
+                type="button"
+                :aria-label="`Remove mention ${agentName(uid)}`"
+                @click="removeMention(uid)"
+              >
+                @{{ agentName(uid) }} <span aria-hidden="true">×</span>
+              </button>
+            </div>
+            <div v-if="mentionSuggestions.length" class="mention-menu" role="listbox">
+              <button
+                v-for="agent in mentionSuggestions"
+                :key="agent.uid"
+                type="button"
+                role="option"
+                @click="insertMention(agent)"
+              >
+                <strong>{{ agent.displayName || agent.username }}</strong>
+                <span>Agent</span>
+              </button>
+            </div>
+            <textarea
+              v-model="draft"
+              aria-label="Message"
+              :placeholder="activeAgents.length ? 'Write a message, type @ to mention an agent' : 'Write a message'"
+              rows="2"
+              @keydown.enter.exact.prevent="sendMessage"
+            />
+          </div>
           <button class="primary" type="submit" :disabled="!draft.trim() || connection !== 'Connected'">
             Send
           </button>
@@ -419,6 +686,15 @@ onBeforeUnmount(logout);
       </template>
     </section>
 
+    <GroupDialog
+      v-if="groupDialogOpen"
+      :session="session"
+      :group="dialogGroup"
+      @close="groupDialogOpen = false"
+      @created="groupCreated"
+      @changed="groupChanged"
+      @removed="groupRemoved"
+    />
     <p v-if="loginError" class="toast" role="alert" @click="loginError = ''">{{ loginError }}</p>
   </main>
 </template>

@@ -1,5 +1,6 @@
-const authBase = trimBase(import.meta.env.VITE_AUTH_BASE || "http://127.0.0.1:26670");
-export const imBase = trimBase(import.meta.env.VITE_IM_BASE || "http://127.0.0.1:26655");
+export const authBase = trimBase(import.meta.env?.VITE_AUTH_BASE || "http://127.0.0.1:26670");
+export const imBase = trimBase(import.meta.env?.VITE_IM_BASE || "http://127.0.0.1:26655");
+export const minContactQueryLength = 2;
 
 export interface ConnectSession {
   uid: string;
@@ -24,6 +25,41 @@ interface ConnectData {
   wsAddr: string;
 }
 
+export interface Contact {
+  id: number;
+  username: string;
+  displayName: string;
+  accountType: "human" | "agent";
+}
+
+export interface IMGroup {
+  id: number;
+  title: string;
+  creatorUid: number;
+  wukongChannelId: string;
+}
+
+export interface GroupMember {
+  uid: number;
+  username: string;
+  displayName: string;
+  avatar: string;
+  accountType: "human" | "agent";
+}
+
+export interface GroupMembers {
+  group: IMGroup;
+  members: GroupMember[];
+}
+
+export interface AgentAllowlist {
+  groupId: number;
+  agentUid: number;
+  ownerUid: number;
+  ownerImplicit: boolean;
+  memberUids: number[];
+}
+
 function trimBase(value: string): string {
   return value.replace(/\/+$/, "");
 }
@@ -38,11 +74,28 @@ async function readJson(response: Response): Promise<unknown> {
 }
 
 async function readEnvelope<T>(response: Response): Promise<T> {
-  const body = await readJson(response) as Partial<Envelope<T>>;
+  const body = await readJson(response) as Partial<Envelope<T>> & { detail?: string };
   if (!response.ok || body.code !== 0 || body.data === undefined) {
-    throw new Error(body.message || `Request failed (${response.status})`);
+    throw new Error(body.message || body.detail || `Request failed (${response.status})`);
   }
   return body.data;
+}
+
+async function request<T>(
+  base: string,
+  path: string,
+  session: ConnectSession,
+  init: RequestInit = {},
+): Promise<T> {
+  const response = await fetch(`${base}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${session.jwt}`,
+      ...(init.body ? { "Content-Type": "application/json" } : {}),
+      ...init.headers,
+    },
+  });
+  return readEnvelope<T>(response);
 }
 
 export async function createSession(username: string, password: string): Promise<ConnectSession> {
@@ -95,4 +148,90 @@ export async function postIM<T>(
     return envelope.data;
   }
   return data as T;
+}
+
+export async function searchContacts(
+  query: string,
+  session: ConnectSession,
+  limit = 20,
+): Promise<Contact[]> {
+  const q = query.trim();
+  if (q.length < minContactQueryLength) return [];
+  const params = new URLSearchParams({ q, limit: String(limit) });
+  return request<Contact[]>(authBase, `/api/v1/addons/auth/contacts/search?${params}`, session);
+}
+
+export function listGroups(session: ConnectSession): Promise<IMGroup[]> {
+  return request<IMGroup[]>(imBase, "/api/v1/im/groups", session);
+}
+
+export function createGroup(
+  title: string,
+  memberUids: number[],
+  session: ConnectSession,
+): Promise<IMGroup> {
+  return request<IMGroup>(imBase, "/api/v1/im/groups", session, {
+    method: "POST",
+    body: JSON.stringify({ title, memberUids }),
+  });
+}
+
+export function getGroupMembers(groupId: number, session: ConnectSession): Promise<GroupMembers> {
+  return request<GroupMembers>(imBase, `/api/v1/im/groups/${groupId}/members`, session);
+}
+
+export function addGroupMembers(
+  groupId: number,
+  memberUids: number[],
+  session: ConnectSession,
+): Promise<GroupMembers> {
+  return request<GroupMembers>(imBase, `/api/v1/im/groups/${groupId}/members`, session, {
+    method: "POST",
+    body: JSON.stringify({ memberUids }),
+  });
+}
+
+export function removeGroupMember(
+  groupId: number,
+  uid: number,
+  session: ConnectSession,
+): Promise<null> {
+  return request<null>(imBase, `/api/v1/im/groups/${groupId}/members/${uid}`, session, {
+    method: "DELETE",
+  });
+}
+
+export function deleteGroup(groupId: number, session: ConnectSession): Promise<null> {
+  return request<null>(imBase, `/api/v1/im/groups/${groupId}`, session, {
+    method: "DELETE",
+  });
+}
+
+export function getAgentAllowlist(
+  groupId: number,
+  agentUid: number,
+  session: ConnectSession,
+): Promise<AgentAllowlist> {
+  return request<AgentAllowlist>(
+    imBase,
+    `/api/v1/im/groups/${groupId}/agents/${agentUid}/allowlist`,
+    session,
+  );
+}
+
+export function replaceAgentAllowlist(
+  groupId: number,
+  agentUid: number,
+  memberUids: number[],
+  session: ConnectSession,
+): Promise<AgentAllowlist> {
+  return request<AgentAllowlist>(
+    imBase,
+    `/api/v1/im/groups/${groupId}/agents/${agentUid}/allowlist`,
+    session,
+    {
+      method: "PUT",
+      body: JSON.stringify({ memberUids }),
+    },
+  );
 }
