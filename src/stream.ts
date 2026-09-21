@@ -41,16 +41,39 @@ export interface LiveAgentResponse {
   clientMsgNo?: string;
 }
 
+export type StreamConnectionState = "connected" | "reconnecting" | "disconnected";
+
 interface ConnectAgentStreamOptions {
   channelId: string;
   channelType: number;
   jwt: string;
   signal: AbortSignal;
   onEvent: (event: AgentStreamEvent) => void;
-  onConnectionChange?: (state: "connected" | "reconnecting") => void;
+  onConnectionChange?: (state: StreamConnectionState) => void;
   fetcher?: typeof fetch;
-  retryDelay?: (signal: AbortSignal) => Promise<void>;
+  retryDelay?: (signal: AbortSignal, delayMs: number) => Promise<void>;
   baseUrl: string;
+  /**
+   * Mints a fresh access token. Called when the stream is rejected as unauthorized and
+   * proactively shortly before the current token expires. Without it an expired token is
+   * retried forever, which is the 1 Hz 401 storm this option exists to prevent.
+   */
+  refreshToken?: () => Promise<string>;
+  /** Access token lifetime; the proactive refresh fires `refreshLeadMs` before it. */
+  tokenTtlMs?: number;
+  refreshLeadMs?: number;
+  maxConsecutiveFailures?: number;
+  now?: () => number;
+}
+
+/** Auth issues 15-minute access tokens; refresh two minutes early while a stream is open. */
+export const accessTokenTtlMs = 15 * 60 * 1000;
+export const refreshLeadMs = 2 * 60 * 1000;
+export const maxConsecutiveStreamFailures = 5;
+
+/** 1s, 2s, 4s, 8s, 16s, then capped at 30s. */
+export function reconnectDelayMs(consecutiveFailures: number): number {
+  return Math.min(1000 * 2 ** Math.max(0, consecutiveFailures - 1), 30_000);
 }
 
 export function parseStreamEvent(type: string, data: Record<string, any>, current = ""): StreamUpdate | null {
@@ -199,9 +222,9 @@ async function readSSE(
   }
 }
 
-function waitToReconnect(signal: AbortSignal): Promise<void> {
+function waitToReconnect(signal: AbortSignal, delayMs: number): Promise<void> {
   return new Promise((resolve) => {
-    const timer = window.setTimeout(resolve, 750);
+    const timer = window.setTimeout(resolve, delayMs);
     signal.addEventListener("abort", () => {
       window.clearTimeout(timer);
       resolve();
@@ -209,11 +232,38 @@ function waitToReconnect(signal: AbortSignal): Promise<void> {
   });
 }
 
+class UnauthorizedStream extends Error {}
+
 export async function connectAgentStream(options: ConnectAgentStreamOptions): Promise<void> {
   const fetcher = options.fetcher || fetch;
   const retryDelay = options.retryDelay || waitToReconnect;
+  const now = options.now || Date.now;
+  const ttl = options.tokenTtlMs ?? accessTokenTtlMs;
+  const lead = options.refreshLeadMs ?? refreshLeadMs;
+  const maxFailures = options.maxConsecutiveFailures ?? maxConsecutiveStreamFailures;
+
+  let jwt = options.jwt;
+  let tokenMintedAt = now();
   let lastEventId = "";
+  let consecutiveFailures = 0;
+
+  // Rotating the token is only possible when a refresher is supplied; without one the
+  // loop must still give up rather than retry an expired token indefinitely.
+  const refresh = async (): Promise<boolean> => {
+    if (!options.refreshToken) return false;
+    try {
+      jwt = await options.refreshToken();
+      tokenMintedAt = now();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   while (!options.signal.aborted) {
+    // Proactive rotation: replace the token before the server starts rejecting it.
+    if (options.refreshToken && now() - tokenMintedAt >= ttl - lead) await refresh();
+
     try {
       const params = new URLSearchParams({
         channel_id: options.channelId,
@@ -222,12 +272,14 @@ export async function connectAgentStream(options: ConnectAgentStreamOptions): Pr
       const response = await fetcher(`${options.baseUrl}/api/v1/im/agent-streams?${params}`, {
         headers: {
           Accept: "text/event-stream",
-          Authorization: `Bearer ${options.jwt}`,
+          Authorization: `Bearer ${jwt}`,
           ...(lastEventId ? { "Last-Event-ID": lastEventId } : {}),
         },
         signal: options.signal,
       });
+      if (response.status === 401) throw new UnauthorizedStream();
       if (!response.ok || !response.body) throw new Error(`Agent stream failed (${response.status})`);
+      consecutiveFailures = 0;
       options.onConnectionChange?.("connected");
       await readSSE(response.body, options.signal, (message) => {
         if (message.id) lastEventId = message.id;
@@ -236,10 +288,24 @@ export async function connectAgentStream(options: ConnectAgentStreamOptions): Pr
       });
     } catch (error) {
       if (options.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) return;
+      // A rejected token is only worth retrying once a new one has been minted, so
+      // reconnect immediately on a successful refresh and otherwise fall through to
+      // backoff. Retrying the same rejected token is what caused the 1 Hz storm.
+      if (error instanceof UnauthorizedStream && await refresh()) {
+        consecutiveFailures = 0;
+        options.onConnectionChange?.("reconnecting");
+        continue;
+      }
     }
-    if (!options.signal.aborted) {
-      options.onConnectionChange?.("reconnecting");
-      await retryDelay(options.signal);
+    if (options.signal.aborted) return;
+
+    consecutiveFailures += 1;
+    if (consecutiveFailures >= maxFailures) {
+      // Surface a visible, actionable state instead of retrying silently forever.
+      options.onConnectionChange?.("disconnected");
+      return;
     }
+    options.onConnectionChange?.("reconnecting");
+    await retryDelay(options.signal, reconnectDelayMs(consecutiveFailures));
   }
 }

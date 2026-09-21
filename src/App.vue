@@ -22,6 +22,7 @@ import {
   getGroupMembers,
   imBase,
   listGroups,
+  refreshSession,
   type ConnectSession,
   type Contact,
   type GroupMember,
@@ -38,6 +39,7 @@ import {
   parseStreamEvent,
   reconcileLiveResponses,
   type LiveAgentResponse,
+  type StreamConnectionState,
 } from "./stream";
 
 const username = ref("");
@@ -53,7 +55,7 @@ const activeChannel = ref<Channel>();
 const activeGroupMembers = ref<GroupMember[]>([]);
 const messages = shallowRef<Message[]>([]);
 const liveResponses = ref<LiveAgentResponse[]>([]);
-const streamConnection = ref<"connected" | "reconnecting">("connected");
+const streamConnection = ref<StreamConnectionState>("connected");
 const draft = ref("");
 const mentionedAgentUids = ref<string[]>([]);
 const loadingHistory = ref(false);
@@ -329,6 +331,12 @@ function startAgentStream(channel: Channel, generation: number): void {
     channelType: channel.channelType,
     jwt: session.value.jwt,
     signal: streamAbort.signal,
+    async refreshToken() {
+      const next = await refreshSession();
+      // Keep the rest of the app on the rotated credentials, not just this stream.
+      session.value = next;
+      return next.jwt;
+    },
     onConnectionChange(state) {
       if (generation === viewGeneration) streamConnection.value = state;
     },
@@ -339,6 +347,11 @@ function startAgentStream(channel: Channel, generation: number): void {
       scrollToBottom();
     },
   });
+}
+
+function retryAgentStream(): void {
+  const channel = activeChannel.value;
+  if (channel) startAgentStream(channel, viewGeneration);
 }
 
 async function openChannel(channel: Channel): Promise<void> {
@@ -642,6 +655,10 @@ onBeforeUnmount(logout);
           </template>
           <p v-if="streamConnection === 'reconnecting'" class="stream-state" role="status">
             Reconnecting live response...
+          </p>
+          <p v-else-if="streamConnection === 'disconnected'" class="stream-state" role="alert">
+            连接已断开，
+            <button class="link" type="button" @click="retryAgentStream">点击重连</button>
           </p>
         </div>
 

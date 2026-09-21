@@ -413,6 +413,16 @@ textarea:focus {
   color: #68736d;
 }
 
+.stream-state .link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #1d6b4d;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
