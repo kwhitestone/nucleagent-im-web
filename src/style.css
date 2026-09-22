@@ -30,6 +30,12 @@
   --im-system-bg: #fff1f2;
 
   --im-uid-font: var(--font-mono);
+
+  /* Wider than the shell's --sidebar-w (264px): a conversation row has to fit a
+   * resolved name AND a message preview, which 264 cannot do. The one
+   * deliberate deviation from the shell's measurements. */
+  --im-list-w: 300px;
+  --im-row-h: 60px;
 }
 
 /* Dark mode ships with PR1 (decision D3). Values are the derived dark set from
@@ -240,14 +246,208 @@ textarea:focus {
   gap: 10px;
 }
 
-/* ---------- application shell ---------- */
+/* ---------- application shell (variant B) ----------
+ *
+ * 72px icon rail + conversation list + chat. This is the shell's AppSidebar
+ * anatomy — brand / nav / list / user slot — split across two columns, so mode
+ * switching and identity move out of the list and the list does one job. */
 
 .app-shell {
   display: grid;
-  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  grid-template-columns: 72px var(--im-list-w) minmax(0, 1fr);
   height: 100vh;
   overflow: hidden;
   background: var(--bg-card);
+}
+
+.rail {
+  display: flex;
+  gap: 6px;
+  padding: 12px 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-card);
+  flex-direction: column;
+  align-items: center;
+}
+
+.rail-brand {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  margin-bottom: 10px;
+  border-radius: var(--r-md);
+  color: #fff;
+  background: var(--grad-brand);
+  box-shadow: var(--shadow-glow-teal);
+  font-size: 15px;
+  font-weight: 800;
+  flex-shrink: 0;
+  place-items: center;
+}
+
+.rail-btn {
+  display: grid;
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: var(--r-md);
+  color: var(--text-secondary);
+  background: transparent;
+  flex-shrink: 0;
+  place-items: center;
+}
+
+.rail-btn:hover {
+  background: var(--bg-hover);
+}
+
+.rail-btn.active {
+  color: var(--indigo-600);
+  background: var(--grad-brand-soft);
+}
+
+@media (prefers-color-scheme: dark) {
+  .rail-btn.active {
+    color: var(--teal-300);
+  }
+}
+
+.rail-glyph {
+  font-size: 17px;
+  line-height: 1;
+}
+
+/* Presence of unread, not the count: at 40px a number would not be legible,
+ * and the exact figure is one column to the right on the row itself. */
+.rail-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--rose-500);
+}
+
+.rail-spacer {
+  flex: 1;
+}
+
+/* identity card — the rail's user slot, same position as the shell's chip */
+.identity {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.identity-chip {
+  display: grid;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-full);
+  background: transparent;
+  place-items: center;
+}
+
+.avatar.round {
+  border-radius: var(--r-full);
+}
+
+.avatar.lg {
+  width: 48px;
+  height: 48px;
+  font-size: 17px;
+}
+
+.identity-pop {
+  display: grid;
+  position: absolute;
+  z-index: 30;
+  bottom: 0;
+  left: calc(100% + 10px);
+  width: 288px;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-xl);
+}
+
+.identity-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.identity-name {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.identity-name strong {
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identity-name small {
+  color: var(--text-secondary);
+  font-size: 11.5px;
+}
+
+/* The UID gets its own row in mono: a digit string set in body type cannot be
+ * checked digit by digit against one someone read out to you. */
+.identity-uid {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-subtle);
+  align-items: center;
+}
+
+.uid-label {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.uid-value {
+  font-family: var(--im-uid-font);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.uid-copy {
+  min-height: 26px;
+  margin-left: auto;
+  padding: 0 10px;
+  font-size: 11.5px;
+}
+
+.identity-hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.identity-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.identity-actions .quiet {
+  flex: 1;
+  min-height: 32px;
+  font-size: 12px;
 }
 
 .sidebar {
@@ -339,13 +539,15 @@ textarea:focus {
   text-transform: uppercase;
 }
 
+/* Row anatomy: [avatar 36] [name + badge / preview] [time / unread] */
 .conversation {
   display: grid;
   position: relative;
-  grid-template-columns: 40px minmax(0, 1fr) auto;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: 10px;
   width: 100%;
-  min-height: 60px;
-  padding: 10px 14px;
+  min-height: var(--im-row-h);
+  padding: 0 12px;
   border: 0;
   text-align: left;
   align-items: center;
@@ -383,15 +585,38 @@ textarea:focus {
   border-radius: var(--r-md);
   color: #fff;
   background: var(--grad-teal-indigo);
+  font-size: 13px;
   font-weight: 700;
+  flex-shrink: 0;
   place-items: center;
+}
+
+.avatar.group {
+  background: linear-gradient(135deg, var(--indigo-500), var(--violet-500));
+}
+
+.avatar.bot {
+  background: linear-gradient(135deg, var(--teal-600), var(--cyan-500));
+}
+
+/* Nobody behind this UID yet — a neutral fill rather than a brand one, so it
+ * reads as "pending" instead of "a person named ?". */
+.avatar.unnamed {
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
 }
 
 .conversation-copy {
   display: grid;
   min-width: 0;
   gap: 2px;
-  padding: 0 10px;
+}
+
+.conversation-name {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  align-items: center;
 }
 
 .conversation-copy strong,
@@ -406,9 +631,53 @@ textarea:focus {
   font-weight: 600;
 }
 
+.conversation-copy strong.mono {
+  font-family: var(--im-uid-font);
+}
+
 .conversation-copy small {
   color: var(--text-secondary);
   font-size: 11.5px;
+}
+
+.conversation-end {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}
+
+.conversation-time {
+  color: var(--text-tertiary);
+  font-family: var(--im-uid-font);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Type is carried by the tag's wording as well as its colour, so the agent /
+ * person / unnamed distinction survives colour-blindness. */
+.tag {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.tag.agent {
+  color: var(--im-agent-fg);
+  background: var(--im-agent-bg);
+}
+
+.tag.relay {
+  color: var(--im-relay-fg);
+  background: var(--im-relay-bg);
+}
+
+.tag.uid {
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
+  font-family: var(--im-uid-font);
+  font-weight: 600;
 }
 
 .unread {
@@ -471,7 +740,8 @@ textarea:focus {
   align-items: center;
 }
 
-.empty-chat {
+.empty-chat,
+.empty-paths {
   display: grid;
   align-self: center;
   justify-items: center;
@@ -480,10 +750,80 @@ textarea:focus {
   text-align: center;
 }
 
-.empty-chat h2 {
-  margin: 14px 0 6px;
+.empty-chat h2,
+.empty-paths h2 {
+  margin: 0 0 6px;
   color: var(--text-primary);
   font-size: 17px;
+}
+
+.empty-paths p {
+  max-width: 44ch;
+  margin: 0;
+  font-size: 13px;
+}
+
+/* Three paths as a numbered vertical list with one primary — deliberately not
+ * three equal tiles. A tile grid is marketing composition; here the three are
+ * not equal (search is the main road), and equal weight would push the choice
+ * back onto someone who has just arrived. */
+.paths {
+  display: grid;
+  width: min(460px, 100%);
+  gap: 10px;
+  margin-top: 22px;
+  text-align: left;
+}
+
+.path {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-card);
+  align-items: center;
+}
+
+.path:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.path.primary {
+  border-color: transparent;
+  color: inherit;
+  background: var(--grad-brand-soft);
+  box-shadow: var(--shadow-sm);
+}
+
+.path-key {
+  width: 18px;
+  color: var(--text-tertiary);
+  font-family: var(--im-uid-font);
+  font-size: 10.5px;
+  text-align: left;
+}
+
+/* Left-aligned inside the card even though the empty state around it is
+ * centred: two-line entries read as a list, and centred list text gives the eye
+ * a ragged left edge to re-find on every row. */
+.path-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  text-align: left;
+}
+
+.path-copy b {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.path-copy small {
+  color: var(--text-secondary);
+  font-size: 11.5px;
 }
 
 .messages {
@@ -568,40 +908,139 @@ textarea:focus {
   border-color: color-mix(in srgb, var(--teal-500) 35%, var(--border));
 }
 
-.stream-error,
-.stream-state {
+/* System line: belongs to this conversation, so it sits in the timeline —
+ * centred, narrow, at most one action. Rose for things a human must act on
+ * (429, budget); neutral grey for a dropped connection, which heals itself. */
+.sysline {
+  display: flex;
+  max-width: 640px;
+  gap: 10px;
   margin: 10px auto;
-  font-size: 12px;
-  text-align: center;
-}
-
-.stream-error {
+  padding: 8px 14px;
+  border: 1px solid color-mix(in srgb, var(--im-system-fg) 30%, transparent);
+  border-radius: var(--r-md);
   color: var(--im-system-fg);
+  background: var(--im-system-bg);
+  font-size: 12px;
+  align-items: center;
+  justify-content: center;
 }
 
-.stream-state {
+.sysline.calm {
+  border-color: var(--border);
   color: var(--text-secondary);
+  background: var(--bg-subtle);
 }
 
-.stream-state .link {
-  padding: 0;
+.sysline-act {
   border: 0;
-  background: none;
-  color: var(--accent);
+  background: transparent;
+  color: inherit;
   font: inherit;
   font-weight: 700;
   text-decoration: underline;
-  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* Typing indicator. Replaces the literal "..." the stream used to render, which
+ * was indistinguishable from an agent that had actually sent three dots. */
+.typing {
+  display: inline-flex;
+  gap: 3px;
+  margin: 0;
+  align-items: center;
+}
+
+.typing i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  animation: blip 1.2s infinite;
+}
+
+.typing i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes blip {
+  0%,
+  100% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.busy-chip .blip {
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentcolor;
+  animation: blip 1.4s var(--ease) infinite;
+}
+
+/* The one divider on the sign-in panel, between SSO and local password. */
+.login-or {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 10px;
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  align-items: center;
+}
+
+.login-or::before,
+.login-or::after {
+  height: 1px;
+  background: var(--border);
+  content: "";
 }
 
 .composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
+  gap: 8px 12px;
   padding: 12px 20px;
   border-top: 1px solid var(--border);
   background: var(--bg-card);
   align-items: end;
+}
+
+/* Enter-to-send is a destructive default — half a message leaves on a stray
+ * return — so the composer states its own keys instead of leaving it folklore. */
+.composer-hint {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 12px;
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+  flex-wrap: wrap;
+}
+
+kbd {
+  padding: 0 4px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-family: var(--im-uid-font);
+  font-size: 10px;
+}
+
+.chat-header .back {
+  display: none;
+  margin-right: 4px;
+  font-size: 22px;
 }
 
 .composer-input {
@@ -751,6 +1190,37 @@ textarea:focus {
   margin: 7px 2px 0;
   color: var(--text-secondary);
   font-size: 12px;
+}
+
+/* Zero-result state. Nothing rendered here before, so "no matches" and "still
+ * searching" looked identical. */
+.picker-empty {
+  display: grid;
+  gap: 3px;
+  margin: 7px 2px 0;
+}
+
+.picker-empty p {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.picker-empty small {
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* The consequence of the allowlist rule, stated under the control rather than
+ * left for the reader to infer from the heading. */
+.allowlist-hint {
+  margin: 2px 0 0;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+}
+
+.check-row.owner-row {
+  color: var(--text-tertiary);
 }
 
 /* ---------- group dialog ---------- */
@@ -929,70 +1399,113 @@ textarea:focus {
   cursor: pointer;
 }
 
+/* ---------- mobile ----------
+ *
+ * The rail becomes a bottom tab bar and list/chat become two screens rather
+ * than two columns: at 390px three columns leaves nothing usable. `.show-chat`
+ * is set by the template once a conversation is open, which is what swaps the
+ * screens — no route, no second state machine.
+ *
+ * Touch targets are >= 44px throughout, per the design board. */
 @media (max-width: 720px) {
   .app-shell {
-    grid-template-columns: 132px minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
   }
 
-  .sidebar-header {
-    padding: 10px;
+  /* Five slots, not four: the identity chip becomes the last tab rather than
+     dropping below the bar, which is where a flex-column rail would put it. */
+  .rail {
+    display: grid;
+    grid-row: 2;
+    grid-template-columns: repeat(5, 1fr);
+    padding: 0;
+    border-top: 1px solid var(--border);
+    border-right: 0;
+    align-items: center;
   }
 
-  .sidebar-header strong {
-    font-size: 13px;
-  }
-
-  .sidebar-header .quiet,
-  .sidebar-header span,
-  .conversation-copy small,
-  .unread {
+  /* The brand mark is chrome, not navigation; the four tabs need the width. */
+  .rail-brand,
+  .rail-spacer {
     display: none;
   }
 
-  .sidebar-tools {
-    padding: 8px;
+  .rail-btn,
+  .identity-chip {
+    width: 100%;
+    height: 52px;
+    border-radius: 0;
   }
 
-  .sidebar-tools .new-group {
-    font-size: 12px;
+  .identity {
+    display: grid;
+    height: 52px;
+    place-items: center;
   }
 
-  .sidebar-section h2 {
-    margin-right: 8px;
-    margin-left: 8px;
+  .identity-pop {
+    right: 8px;
+    bottom: calc(100% + 8px);
+    left: 8px;
+    width: auto;
+  }
+
+  .sidebar,
+  .chat {
+    grid-row: 1;
+    grid-column: 1;
+    min-width: 0;
+  }
+
+  .sidebar {
+    border-right: 0;
+  }
+
+  /* One screen at a time: the list until a conversation is picked, then the
+     chat, with the header's back arrow as the way out. */
+  .app-shell .chat {
+    display: none;
+  }
+
+  .app-shell.show-chat .sidebar {
+    display: none;
+  }
+
+  .app-shell.show-chat .chat {
+    display: grid;
+  }
+
+  .chat-header .back {
+    display: grid;
+  }
+
+  .chat-header,
+  .sidebar-header {
+    padding: 0 12px;
+  }
+
+  .conversation {
+    min-height: 64px;
   }
 
   .contact-results {
     position: fixed;
-    top: var(--topbar-h);
+    top: calc(var(--topbar-h) + 52px);
     right: 8px;
     left: 8px;
   }
 
-  .conversation {
-    grid-template-columns: 30px minmax(0, 1fr);
-    padding: 8px;
-  }
-
-  .avatar {
-    width: 30px;
-    height: 30px;
-  }
-
-  .conversation-copy {
-    padding-right: 0;
-  }
-
   .message {
-    max-width: 90%;
+    max-width: 88%;
   }
 
-  .composer {
-    grid-template-columns: 1fr;
-  }
-
-  .chat-header {
-    padding: 10px 12px;
+  /* Enter means newline on a soft keyboard, so sending goes through the button
+     only — which therefore has to be a proper 44px target. */
+  .composer .primary {
+    width: 44px;
+    height: 44px;
+    padding: 0;
   }
 
   .busy-chip {
@@ -1005,5 +1518,12 @@ textarea:focus {
 
   .group-dialog {
     max-height: calc(100vh - 16px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
   }
 }
