@@ -47,6 +47,12 @@ import {
   startPortalLogin,
 } from "./portal";
 import { installShellBridge, isInShell } from "./shell";
+import {
+  clearCachedProfile,
+  fetchProfile,
+  loadCachedProfile,
+  saveCachedProfile,
+} from "./profile";
 import ContactPicker from "./components/ContactPicker.vue";
 import GroupDialog from "./components/GroupDialog.vue";
 import IdentityCard from "./components/IdentityCard.vue";
@@ -83,10 +89,11 @@ const connection = ref<ConnectionState>("disconnected");
 type RailMode = "all" | "groups" | "agents";
 const railMode = ref<RailMode>("all");
 const searchOpen = ref(false);
-// This account's own display name. Nothing populates it yet: auth's portal
-// exchange decodes only {id, openId} and discards the profile the portal
-// returns, so the identity card falls back to "Portal user <uid>". Wiring a
-// real name is PR3 (decision D1).
+// This account's own display name, read from auth's user-info endpoint. Empty
+// is the normal case for a portal account today: auth decodes only {id, openId}
+// from the portal response and stores "Portal user <uid>", which profile.ts
+// treats as absent. The identity card then shows its own fallback. See
+// profile.ts for where the real name is stranded and what has to change.
 const profileName = ref("");
 const conversations = shallowRef<Conversation[]>([]);
 const groups = ref<IMGroup[]>([]);
@@ -443,6 +450,10 @@ function removeListeners(): void {
 // plus IM connect token, so the connect/listener startup is identical.
 function startSession(nextSession: ConnectSession): void {
   session.value = nextSession;
+  // Render the cached name immediately so a reload does not flash the UID
+  // fallback, then refresh from the server behind it.
+  profileName.value = loadCachedProfile(nextSession.uid)?.displayName || "";
+  void loadProfile(nextSession);
   // Names cached by this account on this browser, so a reload renders them instead of
   // raw UIDs. Reading it here (not at module scope) keeps one account's names out of
   // another's session when the shell swaps users without a sign-out.
@@ -451,6 +462,16 @@ function startSession(nextSession: ConnectSession): void {
   installListeners();
   connection.value = "connecting";
   sdk.connect();
+}
+
+// A failed profile read is not worth surfacing: the identity card falls back to
+// "Portal user <uid>", and blocking or alarming the user over a display name
+// they did not ask for would be worse than the missing name.
+async function loadProfile(forSession: ConnectSession): Promise<void> {
+  const profile = await fetchProfile(forSession);
+  if (!profile || session.value?.uid !== forSession.uid) return;
+  profileName.value = profile.displayName;
+  saveCachedProfile(forSession.uid, profile);
 }
 
 async function login(): Promise<void> {
@@ -518,6 +539,7 @@ const shellBridge = installShellBridge({
       // This is an intentional sign-out, so the per-account name cache goes too.
       if (session.value) {
         clearCachedContacts(session.value.uid);
+        clearCachedProfile(session.value.uid);
         teardownSession();
       }
       return;
@@ -802,6 +824,7 @@ function teardownSession(): void {
   conversations.value = [];
   groups.value = [];
   knownContacts.value = [];
+  profileName.value = "";
   dialOpen.value = false;
   dialUid.value = "";
   activeChannel.value = undefined;
@@ -823,7 +846,10 @@ function logout(): void {
   // which tears this child down through onAuth.
   // A sign-out drops this account's cached names. Unmount (reload/HMR) deliberately keeps
   // them — that is what lets a restored session still render names instead of raw UIDs.
-  if (session.value) clearCachedContacts(session.value.uid);
+  if (session.value) {
+    clearCachedContacts(session.value.uid);
+    clearCachedProfile(session.value.uid);
+  }
   if (embedded) {
     shellBridge.requestLogout();
     teardownSession();
