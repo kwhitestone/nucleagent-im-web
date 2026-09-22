@@ -13,6 +13,9 @@ WORKDIR /build
 # Vite inlines these values at build time.
 ARG VITE_AUTH_BASE=https://nucleagent-auth.dev.ndaeweb.com
 ARG VITE_IM_BASE=https://nucleagent-im.dev.ndaeweb.com
+# The nucleagent-web shell origin. Embedded mode accepts session pushes from
+# this exact origin only (src/shell.ts), and nginx allows framing only from it.
+ARG VITE_SHELL_URL=https://nucleagent-web.dev.ndaeweb.com
 
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -20,11 +23,18 @@ RUN npm ci --no-audit --no-fund
 COPY . .
 RUN VITE_AUTH_BASE="${VITE_AUTH_BASE}" \
     VITE_IM_BASE="${VITE_IM_BASE}" \
+    VITE_SHELL_URL="${VITE_SHELL_URL}" \
     npm run build
 
 FROM ${NGINX_IMAGE} AS final
+ARG VITE_SHELL_URL=https://nucleagent-web.dev.ndaeweb.com
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# frame-ancestors is resolved at container start by nginx's own envsubst of
+# /etc/nginx/templates. Changing the shell origin also requires rebuilding the
+# baked Vite origin above. Mirrors nucleagent-core-web's Dockerfile.
+ENV SHELL_ORIGIN=${VITE_SHELL_URL}
+
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=web-build /build/dist/ /usr/share/nginx/html/
 
 EXPOSE 8080
