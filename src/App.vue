@@ -32,6 +32,7 @@ import ContactPicker from "./components/ContactPicker.vue";
 import GroupDialog from "./components/GroupDialog.vue";
 import { configureSDK } from "./im";
 import { buildOutgoingText } from "./mentions";
+import { isAgentRelayed, readProvenance, rejectionCopy } from "./provenance";
 import {
   applyAgentStreamEvent,
   browserStreamChannelId,
@@ -142,6 +143,19 @@ function agentName(uid: string): string {
   const member = activeGroupMembers.value.find((item) => String(item.uid) === uid);
   const contact = knownContacts.value.find((item) => String(item.id) === uid);
   return member?.displayName || member?.username || contact?.displayName || contact?.username || "Agent";
+}
+
+function isAgentMessage(message: Message): boolean {
+  return activeGroupMembers.value.some(
+    (member) => String(member.uid) === message.fromUID && member.accountType === "agent",
+  );
+}
+
+/** "via @agentA" when this answer was triggered by another agent rather than a human. */
+function relayLabel(message: Message): string {
+  const provenance = readProvenance(message.content);
+  if (!isAgentRelayed(provenance)) return "";
+  return `via @${agentName(provenance!.viaUid)}`;
 }
 
 function rememberContact(contact: Contact): void {
@@ -640,16 +654,23 @@ onBeforeUnmount(logout);
             class="message"
             :class="{ own: isOwnMessage(message) }"
           >
-            <span class="sender">{{ isOwnMessage(message) ? "You" : message.fromUID }}</span>
+            <span class="sender">
+              {{ isOwnMessage(message) ? "You" : message.fromUID }}
+              <span v-if="isAgentMessage(message)" class="agent-badge">Agent</span>
+              <span v-if="relayLabel(message)" class="relay-badge">{{ relayLabel(message) }}</span>
+            </span>
             <div class="bubble">{{ messageText(message) }}</div>
             <time>{{ messageTime(message) }}</time>
           </article>
           <template v-for="response in liveResponses" :key="response.sourceKey">
             <p v-if="response.status === 'error'" class="stream-error" role="status">
-              Response failed. Please try again later.
+              {{ rejectionCopy(response.code || "") }}
             </p>
             <article v-else class="message streaming">
-              <span class="sender">{{ agentName(response.agentUid) }}</span>
+              <span class="sender">
+                {{ agentName(response.agentUid) }}
+                <span class="agent-badge">Agent</span>
+              </span>
               <div class="bubble">{{ response.text || "..." }}</div>
             </article>
           </template>

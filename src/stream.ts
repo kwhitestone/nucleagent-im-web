@@ -39,6 +39,8 @@ export interface LiveAgentResponse {
   revision: number;
   status: "busy" | "complete" | "error";
   clientMsgNo?: string;
+  /** Domain code of a terminal failure, so the UI can name the cause (429 guards). */
+  code?: string;
 }
 
 export type StreamConnectionState = "connected" | "reconnecting" | "disconnected";
@@ -172,7 +174,7 @@ export function applyAgentStreamEvent(
   };
   if ("revision" in event && event.revision < base.revision) return current;
   const next: LiveAgentResponse = event.type === "error"
-    ? { ...base, status: "error" }
+    ? { ...base, status: "error", code: event.code }
     : {
       ...base,
       text: event.text,
