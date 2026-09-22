@@ -22,6 +22,7 @@ import {
   endSession,
   getGroupMembers,
   imBase,
+  imSession,
   listGroups,
   refreshSession,
   type ConnectSession,
@@ -35,6 +36,7 @@ import {
   readCallback,
   startPortalLogin,
 } from "./portal";
+import { installShellBridge, isInShell } from "./shell";
 import ContactPicker from "./components/ContactPicker.vue";
 import GroupDialog from "./components/GroupDialog.vue";
 import { configureSDK } from "./im";
@@ -50,6 +52,9 @@ import {
   type StreamConnectionState,
 } from "./stream";
 
+// Framed by the nucleagent-web shell: the shell owns login/logout and pushes the
+// access token. Standalone (the default) keeps every existing behaviour.
+const embedded = isInShell();
 const username = ref("");
 const password = ref("");
 const loginError = ref("");
@@ -311,8 +316,14 @@ async function login(): Promise<void> {
 }
 
 // Step 1 of the portal handoff: ask auth for a login URL and hand the tab over.
+// Embedded, the shell owns login instead — it holds the refresh cookie and the
+// portal callback origin, so im-web just asks it to open its login modal.
 async function portalLogin(): Promise<void> {
   loginError.value = "";
+  if (embedded) {
+    shellBridge.requestLogin();
+    return;
+  }
   loggingIn.value = true;
   try {
     window.location.assign(await startPortalLogin());
@@ -328,7 +339,9 @@ async function portalLogin(): Promise<void> {
 // credential before any await, then exchange it for a local session. Every
 // failure path must land on the login form with a message, never a blank page.
 async function resumePortalLogin(): Promise<void> {
-  if (!isCallbackPath(window.location)) return;
+  // Embedded, the callback belongs to the shell's origin; im-web must not try
+  // to consume one even if a stale /auth/portal URL is framed.
+  if (embedded || !isCallbackPath(window.location)) return;
   const callback = readCallback(window.location, window.history);
   if (!callback) {
     loginError.value = "Enterprise sign-in was cancelled or the link expired. Try again.";
@@ -339,6 +352,35 @@ async function resumePortalLogin(): Promise<void> {
     startSession(await completePortalLogin(callback));
   } catch (error) {
     loginError.value = error instanceof Error ? error.message : "Enterprise sign-in failed";
+  } finally {
+    loggingIn.value = false;
+  }
+}
+
+// Shell mode: the shell pushes the access token over the validated channel and
+// im-web converges on the same connect-token exchange local login uses. Nothing
+// else about the app changes, and standalone mode never reaches this bridge.
+const shellBridge = installShellBridge({
+  onAuth(intent) {
+    if (!intent.token) {
+      // Shell signed out (or bumped the version with no token): drop local state
+      // without revoking anything ourselves — the shell owns the refresh family.
+      if (session.value) teardownSession();
+      return;
+    }
+    void adoptShellSession(intent.token);
+  },
+});
+
+async function adoptShellSession(accessToken: string): Promise<void> {
+  if (session.value?.jwt === accessToken) return;
+  loginError.value = "";
+  loggingIn.value = true;
+  try {
+    startSession(await imSession({ accessToken }));
+  } catch (error) {
+    loginError.value = error instanceof Error ? error.message : "IM sign-in failed";
+    shellBridge.reportAuthRequired("rejected");
   } finally {
     loggingIn.value = false;
   }
@@ -394,6 +436,13 @@ function startAgentStream(channel: Channel, generation: number): void {
     jwt: session.value.jwt,
     signal: streamAbort.signal,
     async refreshToken() {
+      // Embedded, the refresh cookie lives on the shell's origin, not ours.
+      // Report the rejection instead; the shell rotates and re-pushes an auth
+      // intent, which lands in adoptShellSession and rebuilds the session.
+      if (embedded) {
+        shellBridge.reportAuthRequired("rejected");
+        throw new Error("Shell owns the session refresh");
+      }
       const next = await refreshSession();
       // Keep the rest of the app on the rotated credentials, not just this stream.
       session.value = next;
@@ -583,17 +632,47 @@ function teardownSession(): void {
 // cookie could resume the session. Local state drops immediately either way, so
 // a failed revoke cannot strand the user in a logged-in UI.
 function logout(): void {
+  // Embedded, the refresh cookie is on the shell's origin — revoking from here
+  // would be a cross-origin no-op that leaves the shell still signed in. Ask the
+  // shell to log out; its session bump pushes a null-token auth intent back,
+  // which tears this child down through onAuth.
+  if (embedded) {
+    shellBridge.requestLogout();
+    teardownSession();
+    return;
+  }
   void endSession();
   teardownSession();
 }
 
 // Unmount is app teardown (reload, HMR), not an intentional sign-out, so it
 // releases the connection without revoking the session.
-onBeforeUnmount(teardownSession);
+onBeforeUnmount(() => {
+  shellBridge.dispose();
+  teardownSession();
+});
 </script>
 
 <template>
-  <main v-if="!session" class="login-page">
+  <!-- Embedded: the shell owns login, so no local form. Show progress while its
+       auth intent is in flight, or a way back to the shell's modal if it fails. -->
+  <main v-if="!session && embedded" class="login-page">
+    <div class="login-panel">
+      <div class="brand-mark">N</div>
+      <div>
+        <p class="eyebrow">NucleAgent IM</p>
+        <h1>{{ loggingIn ? "Connecting..." : "Waiting for sign-in" }}</h1>
+      </div>
+      <p v-if="loginError" class="error" role="alert">{{ loginError }}</p>
+      <div class="login-actions">
+        <button class="primary" type="button" :disabled="loggingIn" @click="portalLogin">
+          Sign in
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <main v-else-if="!session" class="login-page">
     <form class="login-panel" @submit.prevent="login">
       <div class="brand-mark">N</div>
       <div>
