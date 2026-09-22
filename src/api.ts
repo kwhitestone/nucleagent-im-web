@@ -131,7 +131,22 @@ export async function createSession(username: string, password: string): Promise
 // The SSE stream authenticates with the Auth access token, whose TTL is 15 minutes.
 // Rotating it needs the HttpOnly refresh cookie, then a fresh IM connect token so the
 // wsAddr/token pair stays consistent with the new JWT.
-export async function refreshSession(): Promise<ConnectSession> {
+//
+// The server rotates the refresh token on every call and treats a *second* call with a
+// different X-Refresh-Request-ID as reuse, which revokes the entire family and signs the
+// user out everywhere. Boot restore adds a second caller alongside the stream's expiry
+// refresh, so in-flight calls share one promise: concurrent callers get the same rotation
+// instead of racing into reuse detection.
+let inFlightRefresh: Promise<ConnectSession> | undefined;
+
+export function refreshSession(): Promise<ConnectSession> {
+  inFlightRefresh ??= rotateSession().finally(() => {
+    inFlightRefresh = undefined;
+  });
+  return inFlightRefresh;
+}
+
+async function rotateSession(): Promise<ConnectSession> {
   const refreshResponse = await fetch(`${authBase}/api/v1/addons/auth/refresh-token`, {
     method: "POST",
     credentials: "include",
