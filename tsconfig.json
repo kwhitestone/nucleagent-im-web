@@ -4,6 +4,11 @@
     "useDefineForClassFields": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    // node --experimental-strip-types resolves real ESM specifiers, so src modules
+    // that node runs directly under test import siblings with the .ts extension.
+    // Vite and this config type-check only, so neither emits from those paths.
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
     "strict": true,
     "jsx": "preserve",
     "resolveJsonModule": true,
