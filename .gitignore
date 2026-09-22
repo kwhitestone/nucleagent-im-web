@@ -2,3 +2,6 @@ node_modules/
 dist/
 .env.local
 *.log
+
+# Scratch dirs for the SFC component tests (tests/render.ts); removed on exit.
+.sfc-*/

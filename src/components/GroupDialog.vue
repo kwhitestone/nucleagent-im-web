@@ -14,6 +14,7 @@ import {
   type GroupMember,
   type IMGroup,
 } from "../api";
+import { useI18n } from "vue-i18n";
 import ContactPicker from "./ContactPicker.vue";
 
 const props = defineProps<{
@@ -27,6 +28,8 @@ const emit = defineEmits<{
   changed: [];
   removed: [group: IMGroup];
 }>();
+
+const { t } = useI18n();
 
 const title = ref("");
 const selected = ref<Contact[]>([]);
@@ -64,7 +67,7 @@ async function load(): Promise<void> {
       );
     }
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "Group details failed to load";
+    error.value = cause instanceof Error ? cause.message : t("group.errLoad");
   } finally {
     loading.value = false;
   }
@@ -84,7 +87,7 @@ async function create(): Promise<void> {
     );
     emit("created", group);
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "Group creation failed";
+    error.value = cause instanceof Error ? cause.message : t("group.errCreate");
   } finally {
     saving.value = false;
   }
@@ -104,7 +107,7 @@ async function addMembers(): Promise<void> {
     await load();
     emit("changed");
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "Members could not be added";
+    error.value = cause instanceof Error ? cause.message : t("group.errMembers");
   } finally {
     saving.value = false;
   }
@@ -119,7 +122,7 @@ async function removeMember(member: GroupMember): Promise<void> {
     await load();
     emit("changed");
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "Member could not be removed";
+    error.value = cause instanceof Error ? cause.message : t("group.errMembers");
   } finally {
     saving.value = false;
   }
@@ -127,13 +130,13 @@ async function removeMember(member: GroupMember): Promise<void> {
 
 async function leave(): Promise<void> {
   if (!props.group || saving.value) return;
-  if (!window.confirm(`Leave ${props.group.title}?`)) return;
+  if (!window.confirm(`${t("group.leave")} — ${props.group.title}?`)) return;
   saving.value = true;
   try {
     await removeGroupMember(props.group.id, Number(props.session.uid), props.session);
     emit("removed", props.group);
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "Group could not be left";
+    error.value = cause instanceof Error ? cause.message : t("group.errSave");
   } finally {
     saving.value = false;
   }
@@ -141,13 +144,13 @@ async function leave(): Promise<void> {
 
 async function destroy(): Promise<void> {
   if (!props.group || saving.value) return;
-  if (!window.confirm(`Delete ${props.group.title}? This cannot be undone.`)) return;
+  if (!window.confirm(`${t("group.delete")} — ${props.group.title}?`)) return;
   saving.value = true;
   try {
     await deleteGroup(props.group.id, props.session);
     emit("removed", props.group);
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "Group could not be deleted";
+    error.value = cause instanceof Error ? cause.message : t("group.errSave");
   } finally {
     saving.value = false;
   }
@@ -176,7 +179,7 @@ async function saveAllowlist(agentUid: number): Promise<void> {
     );
     allowlists.value = { ...allowlists.value, [agentUid]: allowlist };
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : "Allowlist could not be saved";
+    error.value = cause instanceof Error ? cause.message : t("group.errSave");
   } finally {
     saving.value = false;
   }
@@ -192,48 +195,64 @@ onBeforeUnmount(() => window.removeEventListener("keydown", closeOnEscape));
 
 <template>
   <div class="dialog-backdrop" role="presentation" @mousedown.self="$emit('close')">
-    <section class="group-dialog" role="dialog" aria-modal="true" :aria-label="group ? group.title : 'Create group'">
+    <section
+      class="group-dialog"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="group ? group.title : t('group.create')"
+    >
       <header class="dialog-header">
         <div>
-          <h2>{{ group ? group.title : "Create group" }}</h2>
-          <span v-if="group">{{ members.length }} members</span>
+          <h2>{{ group ? group.title : t("group.create") }}</h2>
+          <span v-if="group">{{
+            t("chat.groupMeta", {
+              people: members.length - agents.length,
+              agents: agents.length,
+            })
+          }}</span>
         </div>
-        <button class="icon-button" type="button" aria-label="Close" title="Close" @click="$emit('close')">×</button>
+        <button
+          class="icon-button"
+          type="button"
+          :aria-label="t('group.close')"
+          :title="t('group.close')"
+          @click="$emit('close')"
+        >×</button>
       </header>
 
       <form v-if="!group" class="dialog-body form-stack" @submit.prevent="create">
         <label>
-          Group title
+          {{ t("group.name") }}
           <input v-model="title" maxlength="255" required autofocus>
         </label>
         <ContactPicker
           v-model="selected"
           :session="session"
           multiple
-          label="Members"
-          placeholder="Search members"
+          :label="t('group.members')"
+          :placeholder="t('group.searchMembers')"
           :exclude-uids="[Number(session.uid)]"
         />
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <button class="primary" type="submit" :disabled="saving || !title.trim()">
-          {{ saving ? "Creating..." : "Create group" }}
+          {{ saving ? t("chat.loading") : t("group.create") }}
         </button>
       </form>
 
       <div v-else class="dialog-body">
-        <p v-if="loading" class="loading">Loading group...</p>
+        <p v-if="loading" class="loading">{{ t("chat.loading") }}</p>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
 
         <template v-if="!loading">
           <section class="group-section">
-            <h3>Members</h3>
+            <h3>{{ t("group.members") }}</h3>
             <div class="member-list">
               <div v-for="member in members" :key="member.uid" class="member-row">
                 <span>
                   <strong>{{ member.displayName || member.username }}</strong>
                   <small>
-                    {{ member.accountType === "agent" ? "Agent" : `@${member.username}` }}
-                    <template v-if="member.uid === group.creatorUid">, creator</template>
+                    {{ member.accountType === "agent" ? t("badge.agent") : `@${member.username}` }}
+                    <template v-if="member.uid === group.creatorUid">· {{ t("group.owner") }}</template>
                   </small>
                 </span>
                 <button
@@ -243,33 +262,45 @@ onBeforeUnmount(() => window.removeEventListener("keydown", closeOnEscape));
                   :disabled="saving"
                   @click="removeMember(member)"
                 >
-                  Remove
+                  {{ t("group.remove") }}
                 </button>
               </div>
             </div>
           </section>
 
           <section v-if="isOwner" class="group-section">
-            <h3>Add members</h3>
+            <h3>{{ t("group.addMembers") }}</h3>
             <ContactPicker
               v-model="selected"
               :session="session"
               multiple
-              placeholder="Search contacts"
+              :placeholder="t('group.searchMembers')"
               :exclude-uids="members.map((member) => member.uid)"
             />
-            <button class="quiet" type="button" :disabled="saving || !selected.length" @click="addMembers">
-              Add selected
+            <button
+              class="quiet"
+              type="button"
+              :disabled="saving || !selected.length"
+              @click="addMembers"
+            >
+              {{ t("group.addMembers") }}
             </button>
           </section>
 
           <section v-if="isOwner && agents.length" class="group-section">
-            <h3>Agent allowlists</h3>
+            <!-- Heading was "Agent allowlists", which required the reader to
+                 already know the concept. It is now the question itself, with
+                 the consequence of the rule stated under the control. -->
             <div v-for="agent in agents" :key="agent.uid" class="allowlist">
               <div class="allowlist-heading">
-                <strong>{{ agent.displayName || agent.username }}</strong>
-                <span v-if="allowlists[agent.uid]?.ownerImplicit">Creator always allowed</span>
+                <strong>{{
+                  t("group.allowlistTitle", { agent: agent.displayName || agent.username })
+                }}</strong>
               </div>
+              <label v-if="allowlists[agent.uid]?.ownerImplicit" class="check-row owner-row">
+                <input type="checkbox" checked disabled>
+                {{ t("group.allowlistOwner", { name: t("group.owner") }) }}
+              </label>
               <label v-for="member in allowlistCandidates" :key="member.uid" class="check-row">
                 <input
                   type="checkbox"
@@ -278,19 +309,22 @@ onBeforeUnmount(() => window.removeEventListener("keydown", closeOnEscape));
                 >
                 {{ member.displayName || member.username }}
               </label>
-              <p v-if="!allowlistCandidates.length" class="picker-status">No other people in this group</p>
+              <p v-if="!allowlistCandidates.length" class="picker-status">
+                {{ t("group.allowlistEmpty") }}
+              </p>
+              <p class="allowlist-hint">{{ t("group.allowlistHint") }}</p>
               <button class="quiet" type="button" :disabled="saving" @click="saveAllowlist(agent.uid)">
-                Save allowlist
+                {{ t("group.save") }}
               </button>
             </div>
           </section>
 
           <footer class="dialog-actions">
             <button v-if="!isOwner" class="quiet danger-text" type="button" :disabled="saving" @click="leave">
-              Leave group
+              {{ t("group.leave") }}
             </button>
             <button v-else class="quiet danger-text" type="button" :disabled="saving" @click="destroy">
-              Delete group
+              {{ t("group.delete") }}
             </button>
           </footer>
         </template>
