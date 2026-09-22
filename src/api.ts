@@ -15,7 +15,7 @@ interface Envelope<T> {
   data: T;
 }
 
-interface LoginData {
+export interface LoginData {
   accessToken: string;
 }
 
@@ -98,19 +98,10 @@ async function request<T>(
   return readEnvelope<T>(response);
 }
 
-export async function createSession(username: string, password: string): Promise<ConnectSession> {
-  const loginResponse = await fetch(`${authBase}/api/v1/addons/auth/login`, {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Refresh-Cookie-Only": "1",
-    },
-    body: JSON.stringify({ username, password }),
-  });
-  const login = await readEnvelope<LoginData>(loginResponse);
+// Local password, portal SSO and refresh all return the same local login envelope, so
+// the IM handoff is shared: one connect-token exchange bound to that access token.
+export async function imSession(login: LoginData): Promise<ConnectSession> {
   if (!login.accessToken) throw new Error("Auth response did not include accessToken");
-
   const connectResponse = await fetch(`${imBase}/api/v1/im/connect-token`, {
     method: "POST",
     headers: {
@@ -122,6 +113,19 @@ export async function createSession(username: string, password: string): Promise
     throw new Error("IM response must include uid, token, and wsAddr");
   }
   return { ...connect, jwt: login.accessToken };
+}
+
+export async function createSession(username: string, password: string): Promise<ConnectSession> {
+  const loginResponse = await fetch(`${authBase}/api/v1/addons/auth/login`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Refresh-Cookie-Only": "1",
+    },
+    body: JSON.stringify({ username, password }),
+  });
+  return imSession(await readEnvelope<LoginData>(loginResponse));
 }
 
 // The SSE stream authenticates with the Auth access token, whose TTL is 15 minutes.
@@ -138,20 +142,23 @@ export async function refreshSession(): Promise<ConnectSession> {
     },
     body: "{}",
   });
-  const login = await readEnvelope<LoginData>(refreshResponse);
-  if (!login.accessToken) throw new Error("Refresh response did not include accessToken");
+  return imSession(await readEnvelope<LoginData>(refreshResponse));
+}
 
-  const connectResponse = await fetch(`${imBase}/api/v1/im/connect-token`, {
+// Revokes the whole refresh-token family server-side and expires the HttpOnly
+// cookie. Portal SSO defines no logout endpoint of its own: the portal-issued
+// session is the same local refresh family, so this is the documented path.
+// Clearing client state alone would leave the cookie able to resume a session.
+export async function endSession(): Promise<void> {
+  await fetch(`${authBase}/api/v1/addons/auth/logout`, {
     method: "POST",
+    credentials: "include",
     headers: {
-      Authorization: `Bearer ${login.accessToken}`,
+      "Content-Type": "application/json",
+      "X-Refresh-Cookie-Only": "1",
     },
+    body: "{}",
   });
-  const connect = await readEnvelope<ConnectData>(connectResponse);
-  if (!connect.uid || !connect.token || !connect.wsAddr) {
-    throw new Error("IM response must include uid, token, and wsAddr");
-  }
-  return { ...connect, jwt: login.accessToken };
 }
 
 // The server requires a 16-128 character request identifier in cookie-only mode.

@@ -156,6 +156,11 @@ textarea:focus {
   font-size: 13px;
 }
 
+.login-actions {
+  display: grid;
+  gap: 10px;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);

@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   addGroupMembers,
   createGroup,
+  createSession,
+  endSession,
   getAgentAllowlist,
   getGroupMembers,
   listGroups,
@@ -53,4 +55,60 @@ test("contact and group APIs use the landed method, path, and body contracts", a
   assert.equal(calls[7].init.method, "PUT");
   assert.deepEqual(JSON.parse(String(calls[7].init.body)), { memberUids: [2, 4] });
   assert.equal((calls[7].init.headers as Record<string, string>).Authorization, "Bearer jwt");
+});
+
+test("local password login keeps its own endpoint and connect-token handoff", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const bodies = [
+    { code: 0, message: "success", data: { accessToken: "local-jwt" } },
+    { code: 0, message: "success", data: { uid: "3", token: "im", wsAddr: "ws://im" } },
+  ];
+  globalThis.fetch = async (input, init = {}) => {
+    calls.push({ url: String(input), init });
+    return new Response(JSON.stringify(bodies[calls.length - 1]), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  try {
+    const result = await createSession("alice", "secret");
+    assert.deepEqual(result, { uid: "3", token: "im", wsAddr: "ws://im", jwt: "local-jwt" });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  // Local login must stay on /login, untouched by the portal addition.
+  assert.match(calls[0].url, /\/api\/v1\/addons\/auth\/login$/);
+  assert.equal(calls[0].init.credentials, "include");
+  assert.deepEqual(JSON.parse(String(calls[0].init.body)), {
+    username: "alice",
+    password: "secret",
+  });
+  assert.equal((calls[0].init.headers as Record<string, string>)["X-Refresh-Cookie-Only"], "1");
+  assert.match(calls[1].url, /\/api\/v1\/im\/connect-token$/);
+});
+
+test("signing out revokes the refresh family with the cookie attached", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  globalThis.fetch = async (input, init = {}) => {
+    calls.push({ url: String(input), init });
+    return new Response(JSON.stringify({ code: 0, message: "success" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  try {
+    await endSession();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.match(calls[0].url, /\/api\/v1\/addons\/auth\/logout$/);
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.credentials, "include");
+  assert.equal((calls[0].init.headers as Record<string, string>)["X-Refresh-Cookie-Only"], "1");
 });

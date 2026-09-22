@@ -19,6 +19,7 @@ import {
 } from "wukongimjssdk";
 import {
   createSession,
+  endSession,
   getGroupMembers,
   imBase,
   listGroups,
@@ -28,6 +29,12 @@ import {
   type GroupMember,
   type IMGroup,
 } from "./api";
+import {
+  completePortalLogin,
+  isCallbackPath,
+  readCallback,
+  startPortalLogin,
+} from "./portal";
 import ContactPicker from "./components/ContactPicker.vue";
 import GroupDialog from "./components/GroupDialog.vue";
 import { configureSDK } from "./im";
@@ -281,22 +288,63 @@ function removeListeners(): void {
   listenersInstalled = false;
 }
 
+// Local password and portal SSO converge here: both hold the same local envelope
+// plus IM connect token, so the connect/listener startup is identical.
+function startSession(nextSession: ConnectSession): void {
+  session.value = nextSession;
+  const sdk = configureSDK(nextSession);
+  installListeners();
+  connection.value = "Connecting";
+  sdk.connect();
+}
+
 async function login(): Promise<void> {
   loginError.value = "";
   loggingIn.value = true;
   try {
-    const nextSession = await createSession(username.value.trim(), password.value);
-    session.value = nextSession;
-    const sdk = configureSDK(nextSession);
-    installListeners();
-    connection.value = "Connecting";
-    sdk.connect();
+    startSession(await createSession(username.value.trim(), password.value));
   } catch (error) {
     loginError.value = error instanceof Error ? error.message : "Login failed";
   } finally {
     loggingIn.value = false;
   }
 }
+
+// Step 1 of the portal handoff: ask auth for a login URL and hand the tab over.
+async function portalLogin(): Promise<void> {
+  loginError.value = "";
+  loggingIn.value = true;
+  try {
+    window.location.assign(await startPortalLogin());
+  } catch (error) {
+    loginError.value = error instanceof Error
+      ? error.message
+      : "Enterprise sign-in is unavailable";
+    loggingIn.value = false;
+  }
+}
+
+// Steps 2-4: the portal redirected back to /auth/portal. Read and scrub the
+// credential before any await, then exchange it for a local session. Every
+// failure path must land on the login form with a message, never a blank page.
+async function resumePortalLogin(): Promise<void> {
+  if (!isCallbackPath(window.location)) return;
+  const callback = readCallback(window.location, window.history);
+  if (!callback) {
+    loginError.value = "Enterprise sign-in was cancelled or the link expired. Try again.";
+    return;
+  }
+  loggingIn.value = true;
+  try {
+    startSession(await completePortalLogin(callback));
+  } catch (error) {
+    loginError.value = error instanceof Error ? error.message : "Enterprise sign-in failed";
+  } finally {
+    loggingIn.value = false;
+  }
+}
+
+void resumePortalLogin();
 
 async function syncConversations(): Promise<void> {
   try {
@@ -512,7 +560,7 @@ async function groupChanged(): Promise<void> {
   if (group) await loadActiveGroupMembers(group, viewGeneration);
 }
 
-function logout(): void {
+function teardownSession(): void {
   viewGeneration += 1;
   streamAbort?.abort();
   removeListeners();
@@ -531,7 +579,17 @@ function logout(): void {
   loginError.value = "";
 }
 
-onBeforeUnmount(logout);
+// Signing out must also revoke the refresh family server-side, or the HttpOnly
+// cookie could resume the session. Local state drops immediately either way, so
+// a failed revoke cannot strand the user in a logged-in UI.
+function logout(): void {
+  void endSession();
+  teardownSession();
+}
+
+// Unmount is app teardown (reload, HMR), not an intentional sign-out, so it
+// releases the connection without revoking the session.
+onBeforeUnmount(teardownSession);
 </script>
 
 <template>
@@ -551,9 +609,14 @@ onBeforeUnmount(logout);
         <input v-model="password" type="password" autocomplete="current-password" required>
       </label>
       <p v-if="loginError" class="error" role="alert">{{ loginError }}</p>
-      <button class="primary" type="submit" :disabled="loggingIn">
-        {{ loggingIn ? "Signing in..." : "Sign in" }}
-      </button>
+      <div class="login-actions">
+        <button class="primary" type="submit" :disabled="loggingIn">
+          {{ loggingIn ? "Signing in..." : "Sign in" }}
+        </button>
+        <button class="quiet" type="button" :disabled="loggingIn" @click="portalLogin">
+          企业账号登录
+        </button>
+      </div>
     </form>
   </main>
 
