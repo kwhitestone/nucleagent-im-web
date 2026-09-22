@@ -219,8 +219,19 @@ textarea:focus {
   border-bottom: 1px solid #dce2de;
 }
 
-.new-group {
+.new-group,
+.dial-uid {
   width: 100%;
+}
+
+.uid-dial {
+  display: flex;
+  gap: 8px;
+}
+
+.uid-dial .contact-search {
+  flex: 1;
+  min-width: 0;
 }
 
 .conversation-list {

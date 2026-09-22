@@ -31,6 +31,15 @@ import {
   type IMGroup,
 } from "./api";
 import {
+  clearCachedContacts,
+  contactsFromMembers,
+  isDialableUid,
+  loadCachedContacts,
+  mergeContacts,
+  resolveContactName,
+  saveCachedContacts,
+} from "./contacts";
+import {
   completePortalLogin,
   isCallbackPath,
   readCallback,
@@ -63,7 +72,14 @@ const session = ref<ConnectSession>();
 const connection = ref("Disconnected");
 const conversations = shallowRef<Conversation[]>([]);
 const groups = ref<IMGroup[]>([]);
+// Populated in startSession once the uid is known: the cache is per-account, so there is
+// nothing meaningful to read before then.
 const knownContacts = ref<Contact[]>([]);
+// Boot restore runs before the login form renders, so the form never flashes for a user
+// whose refresh cookie is still good.
+const restoring = ref(!embedded && !isCallbackPath(window.location));
+const dialOpen = ref(false);
+const dialUid = ref("");
 const activeChannel = ref<Channel>();
 const activeGroupMembers = ref<GroupMember[]>([]);
 const messages = shallowRef<Message[]>([]);
@@ -94,9 +110,9 @@ const activeTitle = computed(() => {
   if (channel.channelType === ChannelTypeGroup) {
     return activeGroup.value?.title || `Group ${channel.channelID}`;
   }
-  const contact = knownContacts.value.find((item) => String(item.id) === channel.channelID);
-  return contact?.displayName || contact?.username || `Direct ${channel.channelID}`;
+  return contactName(channel.channelID) || `Direct ${channel.channelID}`;
 });
+const dialUidValid = computed(() => isDialableUid(dialUid.value));
 const sortedConversations = computed(() =>
   [...conversations.value].sort((left, right) => right.timestamp - left.timestamp),
 );
@@ -147,14 +163,12 @@ function conversationTitle(conversation: Conversation): string {
     return groups.value.find((group) => group.wukongChannelId === channel.channelID)?.title
       || channel.channelID;
   }
-  const contact = knownContacts.value.find((item) => String(item.id) === channel.channelID);
-  return contact?.displayName || contact?.username || channel.channelID;
+  return contactName(channel.channelID) || channel.channelID;
 }
 
 function agentName(uid: string): string {
   const member = activeGroupMembers.value.find((item) => String(item.uid) === uid);
-  const contact = knownContacts.value.find((item) => String(item.id) === uid);
-  return member?.displayName || member?.username || contact?.displayName || contact?.username || "Agent";
+  return member?.displayName || member?.username || contactName(uid) || "Agent";
 }
 
 function isAgentMessage(message: Message): boolean {
@@ -170,11 +184,19 @@ function relayLabel(message: Message): string {
   return `via @${agentName(provenance!.viaUid)}`;
 }
 
+function remember(contacts: Contact[]): void {
+  const uid = session.value?.uid;
+  if (!uid) return;
+  knownContacts.value = mergeContacts(knownContacts.value, contacts);
+  saveCachedContacts(uid, knownContacts.value);
+}
+
 function rememberContact(contact: Contact): void {
-  knownContacts.value = [
-    contact,
-    ...knownContacts.value.filter((item) => item.id !== contact.id),
-  ];
+  remember([contact]);
+}
+
+function contactName(uid: string): string | undefined {
+  return resolveContactName(knownContacts.value, uid);
 }
 
 function scrollToBottom(): void {
@@ -297,6 +319,10 @@ function removeListeners(): void {
 // plus IM connect token, so the connect/listener startup is identical.
 function startSession(nextSession: ConnectSession): void {
   session.value = nextSession;
+  // Names cached by this account on this browser, so a reload renders them instead of
+  // raw UIDs. Reading it here (not at module scope) keeps one account's names out of
+  // another's session when the shell swaps users without a sign-out.
+  knownContacts.value = loadCachedContacts(nextSession.uid);
   const sdk = configureSDK(nextSession);
   installListeners();
   connection.value = "Connecting";
@@ -365,7 +391,11 @@ const shellBridge = installShellBridge({
     if (!intent.token) {
       // Shell signed out (or bumped the version with no token): drop local state
       // without revoking anything ourselves — the shell owns the refresh family.
-      if (session.value) teardownSession();
+      // This is an intentional sign-out, so the per-account name cache goes too.
+      if (session.value) {
+        clearCachedContacts(session.value.uid);
+        teardownSession();
+      }
       return;
     }
     void adoptShellSession(intent.token);
@@ -386,7 +416,24 @@ async function adoptShellSession(accessToken: string): Promise<void> {
   }
 }
 
+// The session lives in memory, but the HttpOnly refresh cookie outlives the document, so
+// a reload can rebuild it without the user signing in again. This must not run when the
+// SSO callback is mid-flight (that path is already minting a session and would rotate the
+// same family twice) nor embedded (the shell owns the cookie and pushes a token instead).
+async function restoreSession(): Promise<void> {
+  if (!restoring.value) return;
+  try {
+    startSession(await refreshSession());
+  } catch {
+    // No cookie, expired, or a revoked family: the login form is the correct answer and
+    // a failed restore is not an error worth showing.
+  } finally {
+    restoring.value = false;
+  }
+}
+
 void resumePortalLogin();
+void restoreSession();
 
 async function syncConversations(): Promise<void> {
   try {
@@ -414,6 +461,8 @@ async function loadActiveGroupMembers(group: IMGroup, generation: number): Promi
   if (!session.value) return;
   try {
     const data = await getGroupMembers(group.id, session.value);
+    // Group members are the one server payload carrying names for UIDs we never searched.
+    remember(contactsFromMembers(data.members));
     if (generation === viewGeneration) activeGroupMembers.value = data.members;
   } catch (error) {
     if (generation === viewGeneration) {
@@ -509,6 +558,16 @@ async function openChannel(channel: Channel): Promise<void> {
 function openContact(contact: Contact): void {
   rememberContact(contact);
   void openChannel(new Channel(String(contact.id), ChannelTypePerson));
+}
+
+// No endpoint resolves a UID to a name, so a dialled conversation shows the UID until that
+// person is seen in a search or a shared group. Opening the channel is the whole feature.
+function dialUidOpen(): void {
+  if (!dialUidValid.value) return;
+  const uid = dialUid.value.trim();
+  dialUid.value = "";
+  dialOpen.value = false;
+  void openChannel(new Channel(uid, ChannelTypePerson));
 }
 
 function openGroup(group: IMGroup): void {
@@ -619,6 +678,8 @@ function teardownSession(): void {
   conversations.value = [];
   groups.value = [];
   knownContacts.value = [];
+  dialOpen.value = false;
+  dialUid.value = "";
   activeChannel.value = undefined;
   activeGroupMembers.value = [];
   messages.value = [];
@@ -636,6 +697,9 @@ function logout(): void {
   // would be a cross-origin no-op that leaves the shell still signed in. Ask the
   // shell to log out; its session bump pushes a null-token auth intent back,
   // which tears this child down through onAuth.
+  // A sign-out drops this account's cached names. Unmount (reload/HMR) deliberately keeps
+  // them — that is what lets a restored session still render names instead of raw UIDs.
+  if (session.value) clearCachedContacts(session.value.uid);
   if (embedded) {
     shellBridge.requestLogout();
     teardownSession();
@@ -668,6 +732,18 @@ onBeforeUnmount(() => {
         <button class="primary" type="button" :disabled="loggingIn" @click="portalLogin">
           Sign in
         </button>
+      </div>
+    </div>
+  </main>
+
+  <!-- Restoring from the refresh cookie: hold the form back so a returning user does not
+       see a login flash before the silent restore lands. -->
+  <main v-else-if="!session && restoring" class="login-page">
+    <div class="login-panel">
+      <div class="brand-mark">N</div>
+      <div>
+        <p class="eyebrow">NucleAgent IM</p>
+        <h1>正在恢复会话...</h1>
       </div>
     </div>
   </main>
@@ -711,6 +787,23 @@ onBeforeUnmount(() => {
 
       <div class="sidebar-tools">
         <ContactPicker :session="session" @select="openContact" />
+        <form v-if="dialOpen" class="uid-dial" @submit.prevent="dialUidOpen">
+          <input
+            v-model="dialUid"
+            class="contact-search"
+            inputmode="numeric"
+            aria-label="按 UID 添加"
+            placeholder="输入 UID"
+            autocomplete="off"
+            autofocus
+          >
+          <button class="primary" type="submit" :disabled="!dialUidValid">
+            打开
+          </button>
+        </form>
+        <button v-else class="quiet dial-uid" type="button" @click="dialOpen = true">
+          按 UID 添加
+        </button>
         <button class="quiet new-group" type="button" @click="showCreateGroup">New group</button>
       </div>
 
