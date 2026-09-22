@@ -63,12 +63,15 @@ test("agent stream exposes terminal failure as state, not message content", () =
     sourceKey: "failed",
     code: "execution_failed",
   });
+  // The code is retained as state so the UI can name the cause; the failing text is
+  // still never rendered as agent speech.
   assert.deepEqual(responses[0], {
     sourceKey: "failed",
     agentUid: "",
     text: "",
     revision: 0,
     status: "error",
+    code: "execution_failed",
   });
 });
 
