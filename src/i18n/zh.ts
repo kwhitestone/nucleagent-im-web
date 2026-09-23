@@ -16,7 +16,7 @@ export default {
   },
   login: {
     subtitle: "登录以继续",
-    sso: "使用目鱼登录",
+    sso: "使用目鱼AI登录",
     or: "或",
     username: "用户名",
     password: "密码",
