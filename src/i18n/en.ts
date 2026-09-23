@@ -15,7 +15,7 @@ export default {
   },
   login: {
     subtitle: "Sign in to continue",
-    sso: "Enterprise sign-in",
+    sso: "Sign in with Muyu",
     or: "or",
     username: "Username",
     password: "Password",
