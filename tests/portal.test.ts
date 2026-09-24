@@ -54,7 +54,25 @@ test("the callback strips the credential from the URL before returning it", () =
 
   assert.deepEqual(callback, { state, token: "portal-secret" });
   // The scrub must happen unconditionally and leave no query behind.
-  assert.deepEqual(calls, [callbackPath]);
+  assert.deepEqual(calls, ["/"]);
+});
+
+// Field report (UNI-B0c): after SSO the address bar stayed on /auth/portal, so a
+// reload skipped boot restore (App.vue gates it on !isCallbackPath) and re-entered
+// the callback with a consumed state -> errCancelled. Every path must leave a URL
+// whose reload takes the normal refresh-cookie boot.
+test("after any callback load, a reload is not a callback load", () => {
+  for (const url of [
+    `${callbackPath}?state=${state}&token=portal-secret`,
+    `${callbackPath}?state=${state}&token=already-consumed`,
+    `${callbackPath}?state=garbage&token=x`,
+    callbackPath,
+  ]) {
+    const { history, calls } = fakeHistory();
+    readCallback(fakeLocation(url), history);
+    assert.equal(calls.length, 1, url);
+    assert.equal(isCallbackPath(fakeLocation(calls[0])), false, url);
+  }
 });
 
 test("the callback also accepts the credential in the fragment", () => {
@@ -76,7 +94,7 @@ test("a denied or malformed callback yields no credential but still scrubs the U
   ]) {
     const { history, calls } = fakeHistory();
     assert.equal(readCallback(fakeLocation(url), history), undefined, url);
-    assert.deepEqual(calls, [callbackPath], url);
+    assert.deepEqual(calls, ["/"], url);
   }
 });
 
