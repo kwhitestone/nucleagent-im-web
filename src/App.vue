@@ -20,7 +20,6 @@ import {
 } from "wukongimjssdk";
 import {
   createSession,
-  endSession,
   getGroupMembers,
   imBase,
   imSession,
@@ -46,7 +45,7 @@ import {
   readCallback,
   startPortalLogin,
 } from "./portal";
-import { installShellBridge, isInShell } from "./shell";
+import { installShellBridge, isInShell, shellAccountUrl } from "./shell";
 import {
   clearCachedProfile,
   fetchProfile,
@@ -845,27 +844,15 @@ function teardownSession(): void {
   loginError.value = "";
 }
 
-// Signing out must also revoke the refresh family server-side, or the HttpOnly
-// cookie could resume the session. Local state drops immediately either way, so
-// a failed revoke cannot strand the user in a logged-in UI.
-function logout(): void {
-  // Embedded, the refresh cookie is on the shell's origin — revoking from here
-  // would be a cross-origin no-op that leaves the shell still signed in. Ask the
-  // shell to log out; its session bump pushes a null-token auth intent back,
-  // which tears this child down through onAuth.
-  // A sign-out drops this account's cached names. Unmount (reload/HMR) deliberately keeps
-  // them — that is what lets a restored session still render names instead of raw UIDs.
-  if (session.value) {
-    clearCachedContacts(session.value.uid);
-    clearCachedProfile(session.value.uid);
-  }
+// The identity card's "Account" action. im-web has no sign-out of its own: the
+// shell's /account is the one logout for every site, and its session bump
+// pushes a null-token auth intent that tears this child down through onAuth.
+function openAccount(): void {
   if (embedded) {
-    shellBridge.requestLogout();
-    teardownSession();
+    shellBridge.requestAccount();
     return;
   }
-  void endSession();
-  teardownSession();
+  window.location.assign(shellAccountUrl());
 }
 
 // Unmount is app teardown (reload, HMR), not an intentional sign-out, so it
@@ -995,7 +982,7 @@ onBeforeUnmount(() => {
         v-if="session"
         :uid="session.uid"
         :display-name="profileName"
-        @logout="logout"
+        @account="openAccount"
       />
     </nav>
 

@@ -49,6 +49,13 @@ test("the expanded card shows the uid, a copy control and what the uid is for", 
   assert.match(html, /把这个 UID 发给同事/);
 });
 
+// UNI A-12 ext.: the card is display only; sign-out lives on the shell's /account.
+test("the expanded card links to the account page and offers no sign-out", async () => {
+  const html = await openCard({ uid: "10480118", displayName: "Chen Mo" }, "en");
+  assert.match(html, />Account</);
+  assert.doesNotMatch(html, /Sign out/);
+});
+
 // --- empty state -------------------------------------------------------------
 
 test("the empty state offers all three paths with their when-to-use lines", async () => {

@@ -4,7 +4,6 @@ import {
   addGroupMembers,
   createGroup,
   createSession,
-  endSession,
   getAgentAllowlist,
   getGroupMembers,
   listGroups,
@@ -90,25 +89,3 @@ test("local password login keeps its own endpoint and connect-token handoff", as
   assert.match(calls[1].url, /\/api\/v1\/im\/connect-token$/);
 });
 
-test("signing out revokes the refresh family with the cookie attached", async () => {
-  const originalFetch = globalThis.fetch;
-  const calls: Array<{ url: string; init: RequestInit }> = [];
-  globalThis.fetch = async (input, init = {}) => {
-    calls.push({ url: String(input), init });
-    return new Response(JSON.stringify({ code: 0, message: "success" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  };
-
-  try {
-    await endSession();
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-
-  assert.match(calls[0].url, /\/api\/v1\/addons\/auth\/logout$/);
-  assert.equal(calls[0].init.method, "POST");
-  assert.equal(calls[0].init.credentials, "include");
-  assert.equal((calls[0].init.headers as Record<string, string>)["X-Refresh-Cookie-Only"], "1");
-});

@@ -28,7 +28,6 @@ export default {
     errSsoUnavailable: "Enterprise sign-in is unavailable",
     errFailed: "Sign-in failed",
     retry: "Retry",
-    signOut: "Sign out",
   },
   list: {
     all: "All chats",
@@ -78,6 +77,7 @@ export default {
     invalid: "A UID is digits only",
   },
   me: {
+    account: "Account",
     myUid: "Your UID",
     copy: "Copy",
     copied: "Copied",

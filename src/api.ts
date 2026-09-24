@@ -160,22 +160,6 @@ async function rotateSession(): Promise<ConnectSession> {
   return imSession(await readEnvelope<LoginData>(refreshResponse));
 }
 
-// Revokes the whole refresh-token family server-side and expires the HttpOnly
-// cookie. Portal SSO defines no logout endpoint of its own: the portal-issued
-// session is the same local refresh family, so this is the documented path.
-// Clearing client state alone would leave the cookie able to resume a session.
-export async function endSession(): Promise<void> {
-  await fetch(`${authBase}/api/v1/addons/auth/logout`, {
-    method: "POST",
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Refresh-Cookie-Only": "1",
-    },
-    body: "{}",
-  });
-}
-
 // The server requires a 16-128 character request identifier in cookie-only mode.
 function refreshRequestId(): string {
   const bytes = new Uint8Array(16);

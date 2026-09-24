@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { installShellBridge, isInShell, parseShellAuth } from "../src/shell.ts";
+import { installShellBridge, isInShell, parseShellAuth, shellAccountUrl } from "../src/shell.ts";
 
 const shellOrigin = "http://localhost:26600";
 const token = "access-token";
@@ -102,7 +102,7 @@ test("standalone im-web installs no bridge and reports no shell", () => {
     assert.equal(isInShell(), false);
     const bridge = installShellBridge({ onAuth: () => assert.fail("must not receive auth") });
     assert.equal(bridge.requestLogin(), false);
-    assert.equal(bridge.requestLogout(), false);
+    assert.equal(bridge.requestAccount(), false);
     assert.equal(bridge.reportAuthRequired("missing"), false);
     bridge.dispose();
   } finally {
@@ -134,8 +134,9 @@ test("the shell handshake hands the pushed session to the child", () => {
     });
     assert.deepEqual(received, [token, null]);
 
-    assert.equal(bridge.requestLogout(), true);
-    assert.equal(frame.sent.at(-1)?.message.type, "logout-request");
+    // IM never signs out itself; it asks the shell to open /account (A-12 ext.).
+    assert.equal(bridge.requestAccount(), true);
+    assert.equal(frame.sent.at(-1)?.message.type, "account-request");
     assert.equal(bridge.requestLogin(), true);
     assert.equal(frame.sent.at(-1)?.message.type, "login-request");
     assert.equal(bridge.reportAuthRequired("rejected"), true);
@@ -175,4 +176,11 @@ test("a message from a foreign origin, source, app, or protocol version never re
 
     assert.deepEqual(received, []);
   });
+});
+
+test("standalone, the account action goes to the shell's /account and back to /im", () => {
+  const url = new URL(shellAccountUrl());
+  assert.equal(url.origin, shellOrigin);
+  assert.equal(url.pathname, "/account");
+  assert.equal(url.searchParams.get("redirect"), "/im");
 });

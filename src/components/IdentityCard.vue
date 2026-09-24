@@ -13,7 +13,8 @@ const props = defineProps<{
   displayName?: string;
 }>();
 
-const emit = defineEmits<{ logout: [] }>();
+// Display only: account details and sign-out live on the shell's /account.
+const emit = defineEmits<{ account: [] }>();
 
 const { t } = useI18n();
 const open = ref(false);
@@ -79,7 +80,7 @@ onBeforeUnmount(() => clearTimeout(copyTimer));
 
       <div class="identity-actions">
         <button class="quiet" type="button" @click="toggleLocale">{{ t("me.language") }}</button>
-        <button class="quiet" type="button" @click="emit('logout')">{{ t("login.signOut") }}</button>
+        <button class="quiet" type="button" @click="open = false; emit('account')">{{ t("me.account") }}</button>
       </div>
     </div>
   </div>

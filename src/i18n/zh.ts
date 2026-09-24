@@ -29,7 +29,6 @@ export default {
     errSsoUnavailable: "企业登录暂不可用",
     errFailed: "登录失败",
     retry: "重试",
-    signOut: "退出登录",
   },
   list: {
     all: "全部会话",
@@ -78,6 +77,7 @@ export default {
     invalid: "UID 必须是纯数字",
   },
   me: {
+    account: "账户",
     myUid: "我的 UID",
     copy: "复制",
     copied: "已复制",
