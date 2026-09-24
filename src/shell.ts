@@ -57,7 +57,7 @@ export function parseShellAuth(payload: unknown, lastVersion: number): ShellAuth
 }
 
 export interface ShellBridge {
-  /** Ask the shell to open its login modal (the shell owns the login UI). */
+  /** Ask the shell to take the user to its /login (the shell owns the login UI). */
   requestLogin(): boolean;
   /** Ask the shell to end the session; it revokes the refresh family and re-pushes auth. */
   requestLogout(): boolean;

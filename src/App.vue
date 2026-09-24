@@ -487,14 +487,9 @@ async function login(): Promise<void> {
 }
 
 // Step 1 of the portal handoff: ask auth for a login URL and hand the tab over.
-// Embedded, the shell owns login instead — it holds the refresh cookie and the
-// portal callback origin, so im-web just asks it to open its login modal.
+// Standalone only: embedded runs render no login UI (see signInViaShell).
 async function portalLogin(): Promise<void> {
   loginError.value = "";
-  if (embedded) {
-    shellBridge.requestLogin();
-    return;
-  }
   loggingIn.value = true;
   try {
     window.location.assign(await startPortalLogin());
@@ -542,11 +537,25 @@ const shellBridge = installShellBridge({
         clearCachedProfile(session.value.uid);
         teardownSession();
       }
+      signInViaShell();
       return;
     }
     void adoptShellSession(intent.token);
   },
 });
+
+// Embedded with no session: the shell's auth intent normally lands within a
+// frame or two. If it has not after a short grace period (signed out, expired),
+// ask the shell once to take the user to its /login.
+const SHELL_LOGIN_GRACE_MS = 1500;
+let shellLoginTimer: ReturnType<typeof setTimeout> | undefined;
+function signInViaShell(): void {
+  clearTimeout(shellLoginTimer);
+  shellLoginTimer = setTimeout(() => {
+    if (!session.value && !loggingIn.value) shellBridge.requestLogin();
+  }, SHELL_LOGIN_GRACE_MS);
+}
+if (embedded) signInViaShell();
 
 async function adoptShellSession(accessToken: string): Promise<void> {
   if (session.value?.jwt === accessToken) return;
@@ -862,27 +871,24 @@ function logout(): void {
 // Unmount is app teardown (reload, HMR), not an intentional sign-out, so it
 // releases the connection without revoking the session.
 onBeforeUnmount(() => {
+  clearTimeout(shellLoginTimer);
   shellBridge.dispose();
   teardownSession();
 });
 </script>
 
 <template>
-  <!-- Embedded: the shell owns login, so no local form. Show progress while its
-       auth intent is in flight, or a way back to the shell's modal if it fails. -->
-  <main v-if="!session && embedded" class="login-page">
-    <div class="login-panel">
+  <!-- Embedded: the shell owns sign-in (its /login page), so no login UI here at
+       all — only the interstitial while its auth push is in flight. -->
+  <main v-if="!session && embedded" class="login-page" data-testid="im-embedded-wait">
+    <div class="login-panel" role="status" aria-live="polite">
       <div class="brand-mark">N</div>
       <div>
         <p class="eyebrow">{{ t("app.title") }}</p>
-        <h1>{{ loggingIn ? t("conn.connecting") : t("login.waitingShell") }}</h1>
+        <h1>{{ loggingIn ? t("conn.connecting") : t("login.redirectingTitle") }}</h1>
       </div>
-      <p v-if="loginError" class="error" role="alert">{{ loginError }}</p>
-      <div class="login-actions">
-        <button class="primary" type="button" :disabled="loggingIn" @click="portalLogin">
-          {{ t("login.submit") }}
-        </button>
-      </div>
+      <p v-if="!loggingIn">{{ t("login.redirectingBody") }}</p>
+      <p class="typing" aria-hidden="true"><i /><i /><i /></p>
     </div>
   </main>
 
