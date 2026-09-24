@@ -28,7 +28,9 @@ export function readCallback(location: Location, history: History): PortalCallba
   const fragment = new URLSearchParams(location.hash.replace(/^#/, ""));
   const state = query.get("state") || fragment.get("state") || "";
   const token = query.get("token") || fragment.get("token") || "";
-  history.replaceState(null, "", location.pathname);
+  // Scrub to the app root, not the callback path: a reload of /auth/portal would
+  // skip boot restore and re-enter this branch with nothing to consume.
+  history.replaceState(null, "", "/");
   if (!stateFormat.test(state) || !token) return undefined;
   return { state, token };
 }
