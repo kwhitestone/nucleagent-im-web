@@ -21,39 +21,40 @@ test("the collapsed card shows an initial derived from the resolved name", async
   assert.match(html, /identity-chip/);
 });
 
-test("a missing profile name falls back to Portal user <uid>, never a blank", async () => {
+// The expanded state below is the degraded card (account-ui failed to load):
+// avatar + name only, no actions. The loaded popover is the shell's module,
+// covered by nucleagent-web tests/accountPopover.test.ts.
+test("fallback: a missing profile name falls back to Portal user <uid>, never a blank", async () => {
   const html = await openCard({ uid: "10480118" });
+  assert.match(html, /im-identity-fallback/);
   assert.match(html, /Portal user 10480118/);
   // The initial comes from that fallback rather than rendering empty.
   assert.match(html, />P</);
 });
 
-test("a resolved profile name wins over the fallback", async () => {
+test("fallback: a resolved profile name wins over the placeholder", async () => {
   const html = await openCard({ uid: "10480118", displayName: "Chen Mo" }, "en");
   assert.match(html, /Chen Mo/);
   assert.doesNotMatch(html, /Portal user/);
 });
 
-test("a whitespace-only profile name is treated as absent", async () => {
+test("fallback: a whitespace-only profile name is treated as absent", async () => {
   const html = await openCard({ uid: "10480118", displayName: "   " });
   assert.match(html, /Portal user 10480118/);
 });
 
-// The gap the user actually reported: the UID has to be readable and copyable.
-test("the expanded card shows the uid, a copy control and what the uid is for", async () => {
-  const html = await openCard({ uid: "10480118", displayName: "陈默" });
-  assert.match(html, /10480118/);
-  assert.match(html, /uid-copy/);
-  assert.match(html, /复制/);
-  // Without this line a user knows the UID exists but not why they would send it.
-  assert.match(html, /把这个 UID 发给同事/);
+// UNI-ACCTUI: degraded means display only — no account, sign-out, or copy actions.
+test("fallback: avatar and name only, no actions and no error", async () => {
+  const html = await openCard({ uid: "10480118", displayName: "Chen Mo" }, "en");
+  assert.equal(html.match(/<button/g)?.length, 1, "only the chip is a button");
+  const text = html.replace(/<!--[\s\S]*?-->|<[^>]+>/g, " ");
+  assert.doesNotMatch(text, /Account|Sign out|Copy|error/i);
 });
 
-// UNI A-12 ext.: the card is display only; sign-out lives on the shell's /account.
-test("the expanded card links to the account page and offers no sign-out", async () => {
-  const html = await openCard({ uid: "10480118", displayName: "Chen Mo" }, "en");
-  assert.match(html, />Account</);
-  assert.doesNotMatch(html, /Sign out/);
+test("collapsed: the chip is the popover trigger and renders nothing else", async () => {
+  const html = await render(IdentityCard, { uid: "10480118", displayName: "Chen Mo" }, "en");
+  assert.match(html, /data-testid="im-identity-chip"/);
+  assert.doesNotMatch(html, /identity-pop/);
 });
 
 // --- empty state -------------------------------------------------------------

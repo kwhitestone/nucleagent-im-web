@@ -16,6 +16,10 @@ ARG VITE_IM_BASE=https://nucleagent-im.dev.ndaeweb.com
 # The nucleagent-web shell origin. Embedded mode accepts session pushes from
 # this exact origin only (src/shell.ts), and nginx allows framing only from it.
 ARG VITE_SHELL_URL=https://nucleagent-web.dev.ndaeweb.com
+# The shell-owned AccountPopover remote module (UNI-ACCTUI), imported at
+# runtime; a shell deploy updates it with no im-web rebuild. Empty: the
+# identity card shows avatar + name only.
+ARG VITE_ACCOUNT_UI_URL=https://nucleagent-web.dev.ndaeweb.com/remote/account-ui.js
 
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -24,6 +28,7 @@ COPY . .
 RUN VITE_AUTH_BASE="${VITE_AUTH_BASE}" \
     VITE_IM_BASE="${VITE_IM_BASE}" \
     VITE_SHELL_URL="${VITE_SHELL_URL}" \
+    VITE_ACCOUNT_UI_URL="${VITE_ACCOUNT_UI_URL}" \
     npm run build
 
 FROM ${NGINX_IMAGE} AS final

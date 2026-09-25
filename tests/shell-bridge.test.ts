@@ -134,9 +134,11 @@ test("the shell handshake hands the pushed session to the child", () => {
     });
     assert.deepEqual(received, [token, null]);
 
-    // IM never signs out itself; it asks the shell to open /account (A-12 ext.).
+    // The AccountPopover's two exits both go to the shell (UNI-ACCTUI).
     assert.equal(bridge.requestAccount(), true);
     assert.equal(frame.sent.at(-1)?.message.type, "account-request");
+    assert.equal(bridge.requestLogout(), true);
+    assert.equal(frame.sent.at(-1)?.message.type, "logout-request");
     assert.equal(bridge.requestLogin(), true);
     assert.equal(frame.sent.at(-1)?.message.type, "login-request");
     assert.equal(bridge.reportAuthRequired("rejected"), true);

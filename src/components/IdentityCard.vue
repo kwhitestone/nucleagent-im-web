@@ -1,86 +1,68 @@
 <script setup lang="ts">
-// The gap this closes: session.uid existed only in memory and was used solely to
-// decide message ownership — the UI never rendered it, so a user could not find
-// their own ID to share. It now sits in the rail's user slot (the same place the
-// shell puts its user chip) and expands into a profile popover.
+// The rail's user slot (same place the shell puts its user chip). Clicking it
+// opens the shell-owned AccountPopover (UNI-ACCTUI): name, avatar, UID copy,
+// Manage account, Sign out — one implementation for every site, loaded at
+// runtime from the shell. If that load fails the card degrades to avatar + name
+// only, with no actions, and never shows an error.
 import { computed, onBeforeUnmount, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { toggleLocale } from "../i18n";
+import { useAccountPopover } from "../accountPopover";
+import { getLocale } from "../i18n";
 
 const props = defineProps<{
   uid: string;
   /** Empty until a profile is resolved; falls back to "Portal user <uid>". */
   displayName?: string;
+  /** auth user-info headerImg; the popover shows only absolute http(s) URLs. */
+  avatar?: string;
 }>();
 
-// Display only: account details and sign-out live on the shell's /account.
-const emit = defineEmits<{ account: [] }>();
+const emit = defineEmits<{ account: []; logout: [] }>();
 
 const { t } = useI18n();
+const popover = useAccountPopover();
+/** The degraded card's disclosure; the popover manages its own. */
 const open = ref(false);
-const copied = ref(false);
-let copyTimer: ReturnType<typeof setTimeout> | undefined;
+const chip = ref<HTMLElement>();
 
 const name = computed(() => props.displayName?.trim() || `Portal user ${props.uid}`);
 const initial = computed(() => [...name.value][0]?.toUpperCase() || "?");
 
-async function copyUid(): Promise<void> {
-  try {
-    await navigator.clipboard.writeText(props.uid);
-  } catch {
-    // Clipboard is permission-gated and absent over plain HTTP. Selecting the
-    // UID by hand still works, so a refused copy must not throw a dialog at
-    // someone who can simply read the number that is already on screen.
+async function onClick(): Promise<void> {
+  if (open.value) {
+    open.value = false;
     return;
   }
-  // Feedback lands in place rather than as a toast: a toast is for things that
-  // happen where you are not looking, and the user is looking right at this.
-  copied.value = true;
-  clearTimeout(copyTimer);
-  copyTimer = setTimeout(() => {
-    copied.value = false;
-  }, 2000);
+  const shown = chip.value && await popover.open(chip.value, {
+    user: { nickName: props.displayName?.trim() ?? "", headerImg: props.avatar ?? "", uid: props.uid },
+    locale: getLocale(),
+    manageAccount: () => emit("account"),
+    logout: () => emit("logout"),
+  });
+  if (!shown) open.value = true;
 }
 
-onBeforeUnmount(() => clearTimeout(copyTimer));
+onBeforeUnmount(() => popover.close());
 </script>
 
 <template>
   <div class="identity">
     <button
+      ref="chip"
       class="identity-chip"
       type="button"
+      data-testid="im-identity-chip"
       :aria-label="t('me.openProfile')"
-      :aria-expanded="open"
-      @click="open = !open"
+      @click="onClick"
     >
       <span class="avatar round">{{ initial }}</span>
     </button>
 
-    <div v-if="open" class="identity-pop" role="dialog" :aria-label="t('me.openProfile')">
+    <!-- Degraded (account-ui unavailable): avatar + name only, no actions. -->
+    <div v-if="open" class="identity-pop" role="dialog" data-testid="im-identity-fallback" :aria-label="t('me.openProfile')">
       <div class="identity-head">
         <span class="avatar round lg">{{ initial }}</span>
-        <span class="identity-name">
-          <strong>{{ name }}</strong>
-          <small>{{ t("me.enterpriseAccount") }}</small>
-        </span>
-      </div>
-
-      <!-- UID on its own row, mono, with a copy key: a digit string mixed into
-           body type cannot be checked digit by digit. -->
-      <div class="identity-uid">
-        <span class="uid-label">{{ t("badge.uid") }}</span>
-        <span class="uid-value">{{ uid }}</span>
-        <button class="quiet uid-copy" type="button" @click="copyUid">
-          {{ copied ? t("me.copied") : t("me.copy") }}
-        </button>
-      </div>
-      <!-- Without this line a user knows the UID exists but not what it is for. -->
-      <p class="identity-hint">{{ t("me.shareHint") }}</p>
-
-      <div class="identity-actions">
-        <button class="quiet" type="button" @click="toggleLocale">{{ t("me.language") }}</button>
-        <button class="quiet" type="button" @click="open = false; emit('account')">{{ t("me.account") }}</button>
+        <span class="identity-name"><strong>{{ name }}</strong></span>
       </div>
     </div>
   </div>

@@ -67,8 +67,10 @@ export function parseShellAuth(payload: unknown, lastVersion: number): ShellAuth
 export interface ShellBridge {
   /** Ask the shell to take the user to its /login (the shell owns the login UI). */
   requestLogin(): boolean;
-  /** Ask the shell to open its one account page (the only place that signs out). */
+  /** Ask the shell to open its one account page. */
   requestAccount(): boolean;
+  /** Ask the shell to sign out everywhere (the AccountPopover's Sign out). */
+  requestLogout(): boolean;
   /** Tell the shell the pushed credential was missing or rejected. */
   reportAuthRequired(reason: "missing" | "rejected"): boolean;
   dispose(): void;
@@ -83,7 +85,7 @@ export interface ShellBridgeOptions {
 export function installShellBridge(options: ShellBridgeOptions): ShellBridge {
   if (!isInShell()) {
     const no = () => false;
-    return { requestLogin: no, requestAccount: no, reportAuthRequired: no, dispose: () => undefined };
+    return { requestLogin: no, requestAccount: no, requestLogout: no, reportAuthRequired: no, dispose: () => undefined };
   }
 
   let lastVersion = 0;
@@ -93,7 +95,7 @@ export function installShellBridge(options: ShellBridgeOptions): ShellBridge {
     parent: window.parent,
     messages: {
       toChild: ["auth"],
-      fromChild: ["auth-required", "login-request", "account-request"],
+      fromChild: ["auth-required", "login-request", "account-request", "logout-request"],
     },
     onMessage(type, payload) {
       if (type !== "auth") return;
@@ -111,6 +113,7 @@ export function installShellBridge(options: ShellBridgeOptions): ShellBridge {
   return {
     requestLogin: () => channel.send("login-request", { source: "sub", type: "login-request" }),
     requestAccount: () => channel.send("account-request", { source: "sub", type: "account-request" }),
+    requestLogout: () => channel.send("logout-request", { source: "sub", type: "logout-request" }),
     reportAuthRequired: (reason) => channel.send("auth-required", {
       source: "sub",
       type: "auth-required",

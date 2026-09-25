@@ -77,14 +77,8 @@ export default {
     invalid: "A UID is digits only",
   },
   me: {
-    account: "Account",
     myUid: "Your UID",
-    copy: "Copy",
-    copied: "Copied",
-    shareHint: 'Send this UID to a colleague and they can reach you with "Add by UID".',
     editName: "Edit name",
-    enterpriseAccount: "Enterprise account",
-    language: "Language",
     openProfile: "Open your profile",
   },
   nickname: {

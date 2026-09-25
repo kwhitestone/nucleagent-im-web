@@ -77,14 +77,8 @@ export default {
     invalid: "UID 必须是纯数字",
   },
   me: {
-    account: "账户",
     myUid: "我的 UID",
-    copy: "复制",
-    copied: "已复制",
-    shareHint: "把这个 UID 发给同事，他们就能用「按 UID 添加」找到你。",
     editName: "改昵称",
-    enterpriseAccount: "企业账号",
-    language: "语言",
     openProfile: "打开我的档案",
   },
   nickname: {

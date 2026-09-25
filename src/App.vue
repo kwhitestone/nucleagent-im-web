@@ -94,6 +94,7 @@ const searchOpen = ref(false);
 // treats as absent. The identity card then shows its own fallback. See
 // profile.ts for where the real name is stranded and what has to change.
 const profileName = ref("");
+const profileAvatar = ref("");
 const conversations = shallowRef<Conversation[]>([]);
 const groups = ref<IMGroup[]>([]);
 // Populated in startSession once the uid is known: the cache is per-account, so there is
@@ -451,7 +452,9 @@ function startSession(nextSession: ConnectSession): void {
   session.value = nextSession;
   // Render the cached name immediately so a reload does not flash the UID
   // fallback, then refresh from the server behind it.
-  profileName.value = loadCachedProfile(nextSession.uid)?.displayName || "";
+  const cached = loadCachedProfile(nextSession.uid);
+  profileName.value = cached?.displayName || "";
+  profileAvatar.value = cached?.avatar || "";
   void loadProfile(nextSession);
   // Names cached by this account on this browser, so a reload renders them instead of
   // raw UIDs. Reading it here (not at module scope) keeps one account's names out of
@@ -470,6 +473,7 @@ async function loadProfile(forSession: ConnectSession): Promise<void> {
   const profile = await fetchProfile(forSession);
   if (!profile || session.value?.uid !== forSession.uid) return;
   profileName.value = profile.displayName;
+  profileAvatar.value = profile.avatar;
   saveCachedProfile(forSession.uid, profile);
 }
 
@@ -833,6 +837,7 @@ function teardownSession(): void {
   groups.value = [];
   knownContacts.value = [];
   profileName.value = "";
+  profileAvatar.value = "";
   dialOpen.value = false;
   dialUid.value = "";
   activeChannel.value = undefined;
@@ -844,12 +849,21 @@ function teardownSession(): void {
   loginError.value = "";
 }
 
-// The identity card's "Account" action. im-web has no sign-out of its own: the
-// shell's /account is the one logout for every site, and its session bump
-// pushes a null-token auth intent that tears this child down through onAuth.
+// The AccountPopover's two exits (UNI-ACCTUI). Embedded, both go to the shell:
+// the refresh cookie lives on its origin, and its session bump pushes a
+// null-token auth intent that tears this child down through onAuth.
+// Standalone, both land on the shell's /account, which owns sign-out there.
 function openAccount(): void {
   if (embedded) {
     shellBridge.requestAccount();
+    return;
+  }
+  window.location.assign(shellAccountUrl());
+}
+
+function signOut(): void {
+  if (embedded) {
+    shellBridge.requestLogout();
     return;
   }
   window.location.assign(shellAccountUrl());
@@ -982,7 +996,9 @@ onBeforeUnmount(() => {
         v-if="session"
         :uid="session.uid"
         :display-name="profileName"
+        :avatar="profileAvatar"
         @account="openAccount"
+        @logout="signOut"
       />
     </nav>
 
