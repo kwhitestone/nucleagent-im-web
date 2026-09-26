@@ -11,28 +11,29 @@ FROM ${NODE_IMAGE} AS web-build
 WORKDIR /build
 
 # Vite inlines these values at build time.
-ARG VITE_AUTH_BASE=https://nucleagent-auth.dev.ndaeweb.com
-ARG VITE_IM_BASE=https://nucleagent-im.dev.ndaeweb.com
+ARG VITE_AUTH_BASE
+ARG VITE_IM_BASE
 # The nucleagent-web shell origin. Embedded mode accepts session pushes from
 # this exact origin only (src/shell.ts), and nginx allows framing only from it.
-ARG VITE_SHELL_URL=https://nucleagent-web.dev.ndaeweb.com
+ARG VITE_SHELL_URL
 # The shell-owned AccountPopover remote module (UNI-ACCTUI), imported at
 # runtime; a shell deploy updates it with no im-web rebuild. Empty: the
 # identity card shows avatar + name only.
-ARG VITE_ACCOUNT_UI_URL=https://nucleagent-web.dev.ndaeweb.com/remote/account-ui.js
+ARG VITE_ACCOUNT_UI_URL
 
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
 COPY . .
-RUN VITE_AUTH_BASE="${VITE_AUTH_BASE}" \
+RUN test -n "${VITE_AUTH_BASE}" && test -n "${VITE_IM_BASE}" && test -n "${VITE_SHELL_URL}" && \
+    VITE_AUTH_BASE="${VITE_AUTH_BASE}" \
     VITE_IM_BASE="${VITE_IM_BASE}" \
     VITE_SHELL_URL="${VITE_SHELL_URL}" \
     VITE_ACCOUNT_UI_URL="${VITE_ACCOUNT_UI_URL}" \
     npm run build
 
 FROM ${NGINX_IMAGE} AS final
-ARG VITE_SHELL_URL=https://nucleagent-web.dev.ndaeweb.com
+ARG VITE_SHELL_URL
 
 # frame-ancestors is resolved at container start by nginx's own envsubst of
 # /etc/nginx/templates. Changing the shell origin also requires rebuilding the
