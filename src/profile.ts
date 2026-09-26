@@ -92,7 +92,7 @@ export async function fetchProfile(session: ConnectSession): Promise<UserProfile
   let response: Response;
   try {
     response = await fetch(`${authBase}/api/v1/addons/auth/user-info`, {
-      headers: { Authorization: `Bearer ${session.jwt}` },
+      headers: { Authorization: session.jwt },
     });
   } catch {
     return undefined;

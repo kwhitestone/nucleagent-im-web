@@ -90,7 +90,7 @@ async function request<T>(
   const response = await fetch(`${base}${path}`, {
     ...init,
     headers: {
-      Authorization: `Bearer ${session.jwt}`,
+      Authorization: session.jwt,
       ...(init.body ? { "Content-Type": "application/json" } : {}),
       ...init.headers,
     },
@@ -105,7 +105,7 @@ export async function imSession(login: LoginData): Promise<ConnectSession> {
   const connectResponse = await fetch(`${imBase}/api/v1/im/connect-token`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${login.accessToken}`,
+      Authorization: login.accessToken,
     },
   });
   const connect = await readEnvelope<ConnectData>(connectResponse);
@@ -175,7 +175,7 @@ export async function postIM<T>(
   const response = await fetch(`${imBase}${path}`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${session.jwt}`,
+      Authorization: session.jwt,
       "Content-Type": "application/json",
       token: session.token,
     },
