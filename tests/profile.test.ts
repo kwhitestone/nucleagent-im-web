@@ -58,7 +58,7 @@ test("a real nickname and avatar are read from the auth profile", async () => {
       assert.match(String(input), /\/api\/v1\/addons\/auth\/user-info$/);
       assert.equal(
         (init?.headers as Record<string, string>).Authorization,
-        "Bearer access-token",
+        "access-token",
       );
       return json({ code: 0, message: "ok", data: { id: 1, username: "chenmo", nickName: "陈默", headerImg: "https://example.test/a.png" } });
     },

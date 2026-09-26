@@ -53,7 +53,7 @@ test("contact and group APIs use the landed method, path, and body contracts", a
   assert.match(calls[6].url, /\/api\/v1\/im\/groups\/9\/agents\/3\/allowlist$/);
   assert.equal(calls[7].init.method, "PUT");
   assert.deepEqual(JSON.parse(String(calls[7].init.body)), { memberUids: [2, 4] });
-  assert.equal((calls[7].init.headers as Record<string, string>).Authorization, "Bearer jwt");
+  assert.equal((calls[7].init.headers as Record<string, string>).Authorization, "jwt");
 });
 
 test("local password login keeps its own endpoint and connect-token handoff", async () => {

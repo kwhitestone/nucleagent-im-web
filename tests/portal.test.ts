@@ -159,7 +159,7 @@ test("callback success exchanges the credential and reaches an authed IM session
   assert.ok(calls.every((call) => !call.url.includes("portal-secret")));
   // Completion reuses the shared local-login handoff, not a second contract.
   assert.match(calls[1].url, /\/api\/v1\/im\/connect-token$/);
-  assert.equal((calls[1].init.headers as Record<string, string>).Authorization, "Bearer local-jwt");
+  assert.equal((calls[1].init.headers as Record<string, string>).Authorization, "local-jwt");
 });
 
 test("state mismatch and replay report the server reason instead of a blank page", async () => {

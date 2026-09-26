@@ -274,7 +274,7 @@ export async function connectAgentStream(options: ConnectAgentStreamOptions): Pr
       const response = await fetcher(`${options.baseUrl}/api/v1/im/agent-streams?${params}`, {
         headers: {
           Accept: "text/event-stream",
-          Authorization: `Bearer ${jwt}`,
+          Authorization: jwt,
           ...(lastEventId ? { "Last-Event-ID": lastEventId } : {}),
         },
         signal: options.signal,

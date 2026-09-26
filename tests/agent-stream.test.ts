@@ -120,7 +120,7 @@ test("agent stream reconnect resumes with Last-Event-ID", async () => {
   });
 
   assert.equal(call, 2);
-  assert.equal(headers[0].Authorization, "Bearer jwt");
+  assert.equal(headers[0].Authorization, "jwt");
   assert.equal(headers[0]["Last-Event-ID"], undefined);
   assert.equal(headers[1]["Last-Event-ID"], "8:1");
 });
@@ -165,8 +165,8 @@ test("agent stream mints a fresh token on 401 and reconnects once with the curso
   });
 
   assert.equal(refreshes, 1, "one refresh, not one per retry");
-  assert.equal(headers[1].Authorization, "Bearer expired");
-  assert.equal(headers[2].Authorization, "Bearer fresh", "reconnect must use the new token");
+  assert.equal(headers[1].Authorization, "expired");
+  assert.equal(headers[2].Authorization, "fresh", "reconnect must use the new token");
   assert.equal(headers[2]["Last-Event-ID"], "9:1", "cursor must survive the refresh");
   assert.ok(!states.includes("disconnected"), "a successful refresh is not a disconnect");
 });
@@ -246,7 +246,7 @@ test("agent stream refreshes proactively before the access token expires", async
     onEvent() {},
   });
 
-  assert.equal(tokens[0], "Bearer original");
+  assert.equal(tokens[0], "original");
   assert.equal(refreshes, 1, "rotated once, without waiting for a 401");
-  assert.equal(tokens[1], "Bearer rotated-1");
+  assert.equal(tokens[1], "rotated-1");
 });
