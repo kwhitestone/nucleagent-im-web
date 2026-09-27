@@ -12,8 +12,9 @@
 // Validation mirrors core-web's applyShellSession: monotonic sessionVersion,
 // bounded token, `source === "shell"`. The credential stays in memory.
 import { createRemoteChildChannel } from "./vendor/prism-fusion-plugin-runtime/remote-channel.ts";
+import { outerAware } from "./outerHost.ts";
 
-const shellOrigin = import.meta.env?.VITE_SHELL_URL || "http://localhost:26600";
+const shellOrigin = outerAware(import.meta.env?.VITE_SHELL_URL || "http://localhost:26600");
 
 export interface ShellAuthIntent {
   token: string | null;

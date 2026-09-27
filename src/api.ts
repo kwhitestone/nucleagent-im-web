@@ -1,5 +1,6 @@
-export const authBase = trimBase(import.meta.env?.VITE_AUTH_BASE || "http://127.0.0.1:26670");
-export const imBase = trimBase(import.meta.env?.VITE_IM_BASE || "http://127.0.0.1:26655");
+import { outerAware } from "./outerHost.ts";
+export const authBase = trimBase(outerAware(import.meta.env?.VITE_AUTH_BASE || "http://127.0.0.1:26670"));
+export const imBase = trimBase(outerAware(import.meta.env?.VITE_IM_BASE || "http://127.0.0.1:26655"));
 export const minContactQueryLength = 2;
 
 export interface ConnectSession {
