@@ -7,6 +7,13 @@ export default {
   app: {
     title: "NucleAgent IM",
   },
+  tab: {
+    chats: "Chats",
+    groups: "Groups",
+    agents: "Agents",
+    search: "Search",
+    me: "Me",
+  },
   conn: {
     connected: "Connected",
     connecting: "Connecting…",

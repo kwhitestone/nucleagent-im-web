@@ -56,6 +56,7 @@ onBeforeUnmount(() => popover.close());
       @click="onClick"
     >
       <span class="avatar round">{{ initial }}</span>
+      <span class="rail-label">{{ t("tab.me") }}</span>
     </button>
 
     <!-- Degraded (account-ui unavailable): avatar + name only, no actions. -->

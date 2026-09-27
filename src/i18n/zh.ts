@@ -8,6 +8,13 @@ export default {
   app: {
     title: "NucleAgent IM",
   },
+  tab: {
+    chats: "消息",
+    groups: "群组",
+    agents: "智能体",
+    search: "搜索",
+    me: "我",
+  },
   conn: {
     connected: "已连接",
     connecting: "连接中…",

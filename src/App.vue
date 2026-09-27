@@ -667,6 +667,13 @@ function startAgentStream(channel: Channel, generation: number): void {
   });
 }
 
+/** The bar's 重连: the SDK retries by itself; this asks now instead of on its backoff. */
+function reconnectIm(): void {
+  if (!session.value) return;
+  connection.value = "connecting";
+  WKSDK.shared().connect();
+}
+
 function retryAgentStream(): void {
   const channel = activeChannel.value;
   if (channel) startAgentStream(channel, viewGeneration);
@@ -954,7 +961,8 @@ onBeforeUnmount(() => {
         :aria-pressed="railMode === 'all'"
         @click="railMode = 'all'"
       >
-        <span class="rail-glyph" aria-hidden="true">💬</span>
+        <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
+        <span class="rail-label">{{ t("tab.chats") }}</span>
         <span v-if="totalUnread" class="rail-dot" />
       </button>
       <button
@@ -966,7 +974,8 @@ onBeforeUnmount(() => {
         :aria-pressed="railMode === 'groups'"
         @click="railMode = 'groups'"
       >
-        <span class="rail-glyph" aria-hidden="true">👥</span>
+        <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
+        <span class="rail-label">{{ t("tab.groups") }}</span>
       </button>
       <!-- Agents get their own slot because that is the one thing this product
            has that a generic IM does not. -->
@@ -979,7 +988,8 @@ onBeforeUnmount(() => {
         :aria-pressed="railMode === 'agents'"
         @click="railMode = 'agents'"
       >
-        <span class="rail-glyph" aria-hidden="true">🤖</span>
+        <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2L4 7v10l8 5 8-5V7l-8-5z" /><path d="M12 22V12" /><path d="M4 7l8 5 8-5" /></svg>
+        <span class="rail-label">{{ t("tab.agents") }}</span>
       </button>
       <button
         class="rail-btn"
@@ -988,7 +998,8 @@ onBeforeUnmount(() => {
         :aria-label="t('list.searchPlaceholder')"
         @click="focusSearch"
       >
-        <span class="rail-glyph" aria-hidden="true">🔍</span>
+        <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>
+        <span class="rail-label">{{ t("tab.search") }}</span>
       </button>
 
       <span class="rail-spacer" />
@@ -1008,6 +1019,14 @@ onBeforeUnmount(() => {
           <strong>{{ railMode === "all" ? t("list.all") : railMode === "groups" ? t("list.groups") : t("list.agents") }}</strong>
           <span :class="{ online: connection === 'connected' }">{{ t(`conn.${connection}`) }}</span>
         </div>
+        <!-- Phones (board §05): healthy = an 8px dot by the title; trouble gets the bar below. -->
+        <i
+          class="conn-dot"
+          :class="{ online: connection === 'connected' }"
+          role="img"
+          :aria-label="t(`conn.${connection}`)"
+          data-testid="im-conn-dot"
+        />
         <button
           class="icon-button"
           type="button"
@@ -1018,6 +1037,17 @@ onBeforeUnmount(() => {
           +
         </button>
       </header>
+
+      <p
+        v-if="connection !== 'connected'"
+        class="connbar"
+        :class="connection === 'connecting' ? 'warn' : 'err'"
+        role="status"
+        data-testid="im-connbar"
+      >
+        <span>{{ connection === "connecting" ? t("system.reconnecting") : t(`conn.${connection}`) }}</span>
+        <button v-if="connection === 'disconnected'" type="button" @click="reconnectIm">{{ t("system.reconnect") }}</button>
+      </p>
 
       <div class="sidebar-tools">
         <ContactPicker
