@@ -4,6 +4,7 @@
 // im-web rebuild. Types mirror nucleagent-web src/account-ui/contract.ts — the
 // single definition; this repo cannot import across repositories.
 import { ref, type Ref } from "vue";
+import { outerAware } from "./outerHost.ts";
 
 export interface AccountPopoverParams {
   user: { nickName: string; headerImg: string; uid: number | string; roles?: string[] };
@@ -81,6 +82,6 @@ let shared: AccountPopover | undefined;
 
 /** The app-wide instance, configured by VITE_ACCOUNT_UI_URL (unset: degraded). */
 export function useAccountPopover(): AccountPopover {
-  shared ??= createAccountPopover(import.meta.env?.VITE_ACCOUNT_UI_URL?.trim() || "");
+  shared ??= createAccountPopover(outerAware(import.meta.env?.VITE_ACCOUNT_UI_URL?.trim() || ""));
   return shared;
 }

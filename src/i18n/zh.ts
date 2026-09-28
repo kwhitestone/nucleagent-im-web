@@ -8,6 +8,13 @@ export default {
   app: {
     title: "NucleAgent IM",
   },
+  tab: {
+    chats: "消息",
+    groups: "群组",
+    agents: "智能体",
+    search: "搜索",
+    me: "我",
+  },
   conn: {
     connected: "已连接",
     connecting: "连接中…",
@@ -51,6 +58,9 @@ export default {
     placeholder: "搜索联系人或智能体",
     more: "显示更多",
     degraded: "目录暂不可用，仅显示已有联系人。",
+    loadMore: "加载更多",
+    browseEnd: "已显示全部",
+    browseEmpty: "目录里还没有其他人。",
   },
   badge: {
     agent: "智能体",

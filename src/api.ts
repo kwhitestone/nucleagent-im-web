@@ -1,5 +1,6 @@
-export const authBase = trimBase(import.meta.env?.VITE_AUTH_BASE || "http://127.0.0.1:26670");
-export const imBase = trimBase(import.meta.env?.VITE_IM_BASE || "http://127.0.0.1:26655");
+import { outerAware } from "./outerHost.ts";
+export const authBase = trimBase(outerAware(import.meta.env?.VITE_AUTH_BASE || "http://127.0.0.1:26670"));
+export const imBase = trimBase(outerAware(import.meta.env?.VITE_IM_BASE || "http://127.0.0.1:26655"));
 export const minContactQueryLength = 2;
 
 export interface ConnectSession {
@@ -217,6 +218,7 @@ export interface DirectoryPage {
   page: number;
   hasMore: boolean;
   degraded: boolean;
+  nextCursor?: string; // browse mode only
 }
 
 class NotFound extends Error {}
@@ -245,6 +247,24 @@ export async function searchDirectory(
   }
   const contacts = await searchContacts(q, session);
   return { items: contacts.map((c) => ({ ...c, provisioned: true })), page: 1, hasMore: false, degraded: true };
+}
+
+// Browse everyone by name (empty q): keyset-paged, pass nextCursor back for
+// the next page. null when the directory is switched off (404) — the picker
+// then stays search-only, which is the pre-directory behaviour.
+export async function browseDirectory(
+  session: ConnectSession,
+  cursor = "",
+  pageSize = 20,
+): Promise<DirectoryPage | null> {
+  const params = new URLSearchParams({ pageSize: String(pageSize) });
+  if (cursor) params.set("cursor", cursor);
+  try {
+    return await authGet<DirectoryPage>(`/api/v1/addons/auth/directory/search?${params}`, session);
+  } catch (error) {
+    if (error instanceof NotFound) return null;
+    throw error;
+  }
 }
 
 // Maps a portal-only user to their IM uid, creating the local account on first

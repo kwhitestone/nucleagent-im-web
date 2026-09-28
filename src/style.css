@@ -313,9 +313,21 @@ textarea:focus {
   }
 }
 
-.rail-glyph {
-  font-size: 17px;
-  line-height: 1;
+.rail-icon {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Labels and the status dot/bar are phone chrome (board §05); desktop keeps the icon rail. */
+.rail-label,
+.conn-dot,
+.connbar {
+  display: none;
 }
 
 /* Presence of unread, not the count: at 40px a number would not be legible,
@@ -1536,5 +1548,138 @@ kbd {
   * {
     animation: none !important;
     transition: none !important;
+  }
+}
+
+/* ---------- phones: board §05 ---------- */
+@media (max-width: 720px) {
+  .rail-btn,
+  .identity-chip {
+    align-content: center;
+    gap: 2px;
+    color: var(--text-tertiary);
+  }
+
+  .rail-btn.active {
+    color: var(--accent);
+    background: transparent;
+  }
+
+  .rail-icon {
+    width: 22px;
+    height: 22px;
+  }
+
+  .identity-chip .avatar {
+    width: 24px;
+    height: 24px;
+    font-size: 11px;
+  }
+
+  .rail-label {
+    display: block;
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .rail-dot {
+    top: 6px;
+    right: calc(50% - 16px);
+  }
+
+  /* Healthy connection = one dot, no words. */
+  .sidebar-header span {
+    display: none;
+  }
+
+  .sidebar-header > div {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .sidebar-header {
+    justify-content: flex-start;
+    gap: 8px;
+  }
+
+  .sidebar-header .icon-button {
+    width: 44px;
+    height: 44px;
+    margin-left: auto;
+  }
+
+  .conn-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--slate-400);
+  }
+
+  .conn-dot.online {
+    background: var(--emerald-500);
+  }
+
+  .connbar {
+    display: flex;
+    min-height: 44px;
+    margin: 0;
+    padding: 0 4px 0 16px;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .connbar.warn {
+    color: #92400e;
+    background: #fff7ed;
+  }
+
+  .connbar.err {
+    color: #9f1239;
+    background: #fff1f2;
+  }
+
+  .connbar button {
+    min-width: 44px;
+    height: 44px;
+    margin-left: auto;
+    padding: 0 12px;
+    border: 0;
+    color: inherit;
+    background: transparent;
+    font: inherit;
+    font-weight: 700;
+    text-decoration: underline;
+  }
+
+  /* People round, agents rounded-square: tell them apart at a glance. */
+  .conversation .avatar:not(.bot) {
+    border-radius: var(--r-full);
+  }
+
+  .conversation .avatar {
+    width: 48px;
+    height: 48px;
+    font-size: 17px;
+  }
+
+  .conversation {
+    min-height: 68px;
+  }
+}
+
+@media (max-width: 720px) and (prefers-color-scheme: dark) {
+  .connbar.warn {
+    color: var(--amber-400);
+    background: #2b2113;
+  }
+
+  .connbar.err {
+    color: var(--rose-400);
+    background: #2c1620;
   }
 }

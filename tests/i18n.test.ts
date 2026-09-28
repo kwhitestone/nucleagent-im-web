@@ -85,3 +85,15 @@ test("literal @ survives into the rendered string", () => {
   assert.equal(t("badge.via", { name: "research-bot" }), "via @research-bot");
   assert.ok(t("list.searchPlaceholder").includes("@username"));
 });
+
+// UNI-MOBILE-IMPL M2 (board §05): the rail uses line icons + labels, never emoji glyphs.
+test("rail tabs are line icons with labels, no emoji", async () => {
+  const { readFileSync } = await import("node:fs");
+  const app = readFileSync(new URL("../src/App.vue", import.meta.url), "utf8");
+  assert.doesNotMatch(app, /[💬👥🤖🔍]/u);
+  assert.equal((app.match(/class="rail-icon"/g) ?? []).length, 4);
+  for (const key of ["chats", "groups", "agents", "search", "me"]) {
+    assert.ok((zh as Messages & { tab: Record<string, string> }).tab[key]);
+    assert.ok((en as Messages & { tab: Record<string, string> }).tab[key]);
+  }
+});
