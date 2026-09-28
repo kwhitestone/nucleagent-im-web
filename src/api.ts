@@ -205,6 +205,60 @@ export async function searchContacts(
   return request<Contact[]>(authBase, `/api/v1/addons/auth/contacts/search?${params}`, session);
 }
 
+// A directory entry is either a local account (id = IM uid) or a portal user
+// who has never logged in (id 0, provisioned false) — resolve those with
+// provisionContact before opening a channel.
+export interface DirectoryEntry extends Contact {
+  portalUid?: number;
+  provisioned: boolean;
+}
+
+export interface DirectoryPage {
+  items: DirectoryEntry[];
+  page: number;
+  hasMore: boolean;
+  degraded: boolean;
+}
+
+class NotFound extends Error {}
+
+async function authGet<T>(path: string, session: ConnectSession): Promise<T> {
+  const response = await fetch(`${authBase}${path}`, { headers: { Authorization: session.jwt } });
+  if (response.status === 404) throw new NotFound();
+  return readEnvelope<T>(response);
+}
+
+// Directory search (auth userdirectory). When the directory is switched off
+// for this env (404), falls back to plain contacts search so the picker keeps
+// working with provisioned users only.
+export async function searchDirectory(
+  query: string,
+  session: ConnectSession,
+  page = 1,
+): Promise<DirectoryPage> {
+  const q = query.trim();
+  if (q.length < minContactQueryLength) return { items: [], page, hasMore: false, degraded: false };
+  try {
+    return await authGet<DirectoryPage>(
+      `/api/v1/addons/auth/directory/search?${new URLSearchParams({ q, page: String(page) })}`, session);
+  } catch (error) {
+    if (!(error instanceof NotFound)) throw error;
+  }
+  const contacts = await searchContacts(q, session);
+  return { items: contacts.map((c) => ({ ...c, provisioned: true })), page: 1, hasMore: false, degraded: true };
+}
+
+// Maps a portal-only user to their IM uid, creating the local account on first
+// contact. Messages sent to that uid wait in WuKongIM until they first log in.
+export async function provisionContact(entry: DirectoryEntry, session: ConnectSession): Promise<Contact> {
+  if (entry.provisioned && entry.id) return entry;
+  const { id } = await request<{ id: number }>(authBase, "/api/v1/addons/auth/directory/provision", session, {
+    method: "POST",
+    body: JSON.stringify({ portalUid: entry.portalUid }),
+  });
+  return { id, username: entry.username, displayName: entry.displayName, accountType: entry.accountType };
+}
+
 export function listGroups(session: ConnectSession): Promise<IMGroup[]> {
   return request<IMGroup[]>(imBase, "/api/v1/im/groups", session);
 }
