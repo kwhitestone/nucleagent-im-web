@@ -3,9 +3,11 @@ import { onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   minContactQueryLength,
-  searchContacts,
+  provisionContact,
+  searchDirectory,
   type ConnectSession,
   type Contact,
+  type DirectoryEntry,
 } from "../api";
 
 const { t } = useI18n();
@@ -31,9 +33,12 @@ const emit = defineEmits<{
 }>();
 
 const query = ref("");
-const results = ref<Contact[]>([]);
+const results = ref<DirectoryEntry[]>([]);
 const loading = ref(false);
 const error = ref("");
+const page = ref(1);
+const hasMore = ref(false);
+const degraded = ref(false);
 let timer: ReturnType<typeof setTimeout> | undefined;
 let generation = 0;
 
@@ -50,13 +55,12 @@ watch(query, (value) => {
   loading.value = true;
   timer = setTimeout(async () => {
     try {
-      const contacts = await searchContacts(value, props.session);
+      const found = await searchDirectory(value, props.session);
       if (current !== generation) return;
-      const excluded = new Set([
-        ...props.excludeUids,
-        ...props.modelValue.map((contact) => contact.id),
-      ]);
-      results.value = contacts.filter((contact) => !excluded.has(contact.id));
+      page.value = 1;
+      hasMore.value = found.hasMore;
+      degraded.value = found.degraded;
+      results.value = visible(found.items);
     } catch (cause) {
       if (current === generation) {
         error.value = cause instanceof Error ? cause.message : t("search.errFailed");
@@ -68,7 +72,41 @@ watch(query, (value) => {
   }, 250);
 });
 
-function choose(contact: Contact): void {
+function visible(items: DirectoryEntry[]): DirectoryEntry[] {
+  const excluded = new Set([...props.excludeUids, ...props.modelValue.map((contact) => contact.id)]);
+  return items.filter((item) => !item.id || !excluded.has(item.id));
+}
+
+async function more(): Promise<void> {
+  const current = generation;
+  loading.value = true;
+  try {
+    const found = await searchDirectory(query.value, props.session, page.value + 1);
+    if (current !== generation) return;
+    page.value = found.page;
+    hasMore.value = found.hasMore;
+    results.value = [...results.value, ...visible(found.items)];
+  } catch (cause) {
+    if (current === generation) error.value = cause instanceof Error ? cause.message : t("search.errFailed");
+  } finally {
+    if (current === generation) loading.value = false;
+  }
+}
+
+function entryKey(entry: DirectoryEntry): string {
+  return `${entry.id}:${entry.portalUid ?? 0}`;
+}
+
+// Portal-only people get their local account (and IM uid) on first pick;
+// whatever is sent waits in WuKongIM until they first log in.
+async function choose(entry: DirectoryEntry): Promise<void> {
+  let contact: Contact;
+  try {
+    contact = await provisionContact(entry, props.session);
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : t("search.errFailed");
+    return;
+  }
   if (props.multiple) {
     emit("update:modelValue", [...props.modelValue, contact]);
   } else {
@@ -116,7 +154,7 @@ onBeforeUnmount(() => {
     <div v-else-if="results.length" class="contact-results" role="listbox">
       <button
         v-for="contact in results"
-        :key="contact.id"
+        :key="entryKey(contact)"
         class="contact-result"
         type="button"
         role="option"
@@ -126,12 +164,15 @@ onBeforeUnmount(() => {
           <strong>{{ contact.displayName || contact.username }}</strong>
           <!-- Both @username and UID: the only way to tell duplicate names
                apart, and it quietly teaches that a UID is shareable. -->
-          <small>@{{ contact.username }} · {{ t("badge.uid") }} {{ contact.id }}</small>
+          <small v-if="contact.provisioned">@{{ contact.username }} · {{ t("badge.uid") }} {{ contact.id }}</small>
+          <small v-else>{{ t("badge.notJoined") }}</small>
         </span>
-        <span class="account-badge" :class="contact.accountType">
+        <span class="account-badge" :class="contact.provisioned ? contact.accountType : 'portal'">
           {{ contact.accountType === "agent" ? t("badge.agent") : t("badge.person") }}
         </span>
       </button>
+      <button v-if="hasMore" class="quiet contact-more" type="button" @click="more">{{ t("search.more") }}</button>
+      <p v-if="degraded" class="picker-status">{{ t("search.degraded") }}</p>
     </div>
     <!-- Previously nothing rendered here at all, so a search that matched
          nothing looked identical to one still in flight. The copy states that
