@@ -58,6 +58,9 @@ export default {
     placeholder: "Search people and agents",
     more: "Show more",
     degraded: "Directory unavailable — showing existing contacts only.",
+    loadMore: "Load more",
+    browseEnd: "That's everyone",
+    browseEmpty: "No one else is in the directory yet.",
   },
   badge: {
     agent: "Agent",

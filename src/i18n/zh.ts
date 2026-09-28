@@ -58,6 +58,9 @@ export default {
     placeholder: "搜索联系人或智能体",
     more: "显示更多",
     degraded: "目录暂不可用，仅显示已有联系人。",
+    loadMore: "加载更多",
+    browseEnd: "已显示全部",
+    browseEmpty: "目录里还没有其他人。",
   },
   badge: {
     agent: "智能体",

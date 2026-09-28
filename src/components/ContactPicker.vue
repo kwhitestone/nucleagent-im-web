@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import {
+  browseDirectory,
   minContactQueryLength,
   provisionContact,
   searchDirectory,
@@ -93,6 +94,54 @@ async function more(): Promise<void> {
   }
 }
 
+// Browse: with an empty query, focusing the box lists everyone by name
+// (keyset-paged by the server). Loaded once per picker and kept, so reopening
+// is instant; exclusions are applied at render so picks drop out live.
+const root = ref<HTMLElement | null>(null);
+const open = ref(false);
+const browseItems = ref<DirectoryEntry[]>([]);
+const browseCursor = ref("");
+const browseHasMore = ref(false);
+const browseLoaded = ref(false);
+const browseOff = ref(false); // directory switched off: search-only picker
+const browseDegraded = ref(false);
+const browseLoading = ref(false);
+const browseError = ref("");
+const browsing = computed(() => open.value && !query.value.trim() && !browseOff.value);
+const browseShown = computed(() => visible(browseItems.value));
+
+async function loadBrowse(): Promise<void> {
+  if (browseLoading.value) return;
+  browseLoading.value = true;
+  browseError.value = "";
+  try {
+    const found = await browseDirectory(props.session, browseCursor.value);
+    if (!found) {
+      browseOff.value = true;
+      return;
+    }
+    browseItems.value = [...browseItems.value, ...found.items];
+    browseCursor.value = found.nextCursor ?? "";
+    browseHasMore.value = found.hasMore && !!found.nextCursor;
+    browseDegraded.value = found.degraded;
+    browseLoaded.value = true;
+  } catch (cause) {
+    browseError.value = cause instanceof Error ? cause.message : t("search.errFailed");
+  } finally {
+    browseLoading.value = false;
+  }
+}
+
+function openBrowse(): void {
+  open.value = true;
+  if (!browseLoaded.value && !browseOff.value) void loadBrowse();
+}
+
+function closeOnOutside(event: PointerEvent): void {
+  if (root.value && !root.value.contains(event.target as Node)) open.value = false;
+}
+if (typeof document !== "undefined") document.addEventListener("pointerdown", closeOnOutside);
+
 function entryKey(entry: DirectoryEntry): string {
   return `${entry.id}:${entry.portalUid ?? 0}`;
 }
@@ -114,6 +163,7 @@ async function choose(entry: DirectoryEntry): Promise<void> {
   }
   query.value = "";
   results.value = [];
+  if (!props.multiple) open.value = false; // group dialog: keep browsing to add more
 }
 
 function remove(contact: Contact): void {
@@ -122,11 +172,12 @@ function remove(contact: Contact): void {
 
 onBeforeUnmount(() => {
   if (timer) clearTimeout(timer);
+  if (typeof document !== "undefined") document.removeEventListener("pointerdown", closeOnOutside);
 });
 </script>
 
 <template>
-  <div class="contact-picker">
+  <div ref="root" class="contact-picker">
     <label v-if="label" class="field-label">{{ label }}</label>
     <input
       v-model="query"
@@ -134,7 +185,11 @@ onBeforeUnmount(() => {
       type="search"
       :aria-label="label || placeholder || t('search.placeholder')"
       :placeholder="placeholder || t('search.placeholder')"
+      :aria-expanded="browsing"
       autocomplete="off"
+      @focus="openBrowse"
+      @click="openBrowse"
+      @keydown.esc="open = false"
     >
     <div v-if="multiple && modelValue.length" class="selected-contacts">
       <button
@@ -148,7 +203,34 @@ onBeforeUnmount(() => {
         {{ contact.displayName || contact.username }} <span aria-hidden="true">×</span>
       </button>
     </div>
-    <p v-if="query.trim().length === 1" class="picker-status">{{ t("search.minChars") }}</p>
+    <!-- Browse mode: everyone, by name. Same rows and badges as search. -->
+    <div v-if="browsing" class="contact-results" role="listbox" data-testid="im-directory-browse">
+      <button
+        v-for="contact in browseShown"
+        :key="entryKey(contact)"
+        class="contact-result"
+        type="button"
+        role="option"
+        @click="choose(contact)"
+      >
+        <span>
+          <strong>{{ contact.displayName || contact.username }}</strong>
+          <small v-if="contact.provisioned">@{{ contact.username }} · {{ t("badge.uid") }} {{ contact.id }}</small>
+          <small v-else>{{ t("badge.notJoined") }}</small>
+        </span>
+        <span class="account-badge" :class="contact.provisioned ? contact.accountType : 'portal'">
+          {{ contact.accountType === "agent" ? t("badge.agent") : t("badge.person") }}
+        </span>
+      </button>
+      <p v-if="error" class="picker-status error" role="alert">{{ error }}</p>
+      <p v-if="browseLoading" class="picker-status">{{ t("chat.loading") }}</p>
+      <p v-else-if="browseError" class="picker-status error" role="alert">{{ browseError }}</p>
+      <button v-else-if="browseHasMore" class="quiet contact-more" type="button" @click="loadBrowse">{{ t("search.loadMore") }}</button>
+      <p v-else-if="browseLoaded && !browseShown.length" class="picker-status">{{ t("search.browseEmpty") }}</p>
+      <p v-else-if="browseLoaded" class="picker-status picker-end">{{ t("search.browseEnd") }}</p>
+      <p v-if="browseDegraded" class="picker-status">{{ t("search.degraded") }}</p>
+    </div>
+    <p v-else-if="query.trim().length === 1" class="picker-status">{{ t("search.minChars") }}</p>
     <p v-else-if="loading" class="picker-status">{{ t("search.searching") }}</p>
     <p v-else-if="error" class="picker-status error" role="alert">{{ error }}</p>
     <div v-else-if="results.length" class="contact-results" role="listbox">
