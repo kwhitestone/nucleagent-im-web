@@ -49,6 +49,8 @@ export default {
     prefixHint: "搜索匹配用户名和昵称的开头。知道 UID 的话可以直接按 UID 添加。",
     errFailed: "联系人搜索失败",
     placeholder: "搜索联系人或智能体",
+    more: "显示更多",
+    degraded: "目录暂不可用，仅显示已有联系人。",
   },
   badge: {
     agent: "智能体",
@@ -56,6 +58,7 @@ export default {
     agentCount: "智能体 ×{count}",
     uid: "UID",
     via: "经 {'@'}{name} 转交",
+    notJoined: "尚未加入，对方首次登录后即可看到消息",
   },
   empty: {
     noConversations: "还没有会话",

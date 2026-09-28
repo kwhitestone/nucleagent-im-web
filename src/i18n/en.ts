@@ -49,6 +49,8 @@ export default {
       "Search matches the start of a username or nickname. If you have their UID, add by UID instead.",
     errFailed: "Contact search failed",
     placeholder: "Search people and agents",
+    more: "Show more",
+    degraded: "Directory unavailable — showing existing contacts only.",
   },
   badge: {
     agent: "Agent",
@@ -56,6 +58,7 @@ export default {
     agentCount: "{count} agents",
     uid: "UID",
     via: "via {'@'}{name}",
+    notJoined: "Hasn't joined yet — they'll see your message on first sign-in",
   },
   empty: {
     noConversations: "No conversations yet",
