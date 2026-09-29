@@ -37,12 +37,12 @@ RUN test -n "${VITE_AUTH_BASE}" && test -n "${VITE_IM_BASE}" && test -n "${VITE_
 FROM ${NGINX_IMAGE} AS final
 ARG VITE_SHELL_URL
 
-# frame-ancestors is resolved at container start by nginx's own envsubst of
-# /etc/nginx/templates. Changing the shell origin also requires rebuilding the
-# baked Vite origin above. Mirrors nucleagent-core-web's Dockerfile.
+# frame-ancestors is resolved at container start by the dedicated runtime
+# script. Changing the shell origin also requires rebuilding the baked Vite
+# origin above.
 ENV SHELL_ORIGIN=${VITE_SHELL_URL}
 
-COPY nginx.conf.template /etc/nginx/templates/nginx.conf.template
+COPY nginx.conf.tpl /etc/nginx/templates/nginx.conf.tpl
 COPY docker-entrypoint.d/40-runtime-config.sh /docker-entrypoint.d/40-runtime-config.sh
 RUN chmod 0555 /docker-entrypoint.d/40-runtime-config.sh
 COPY --from=web-build /build/dist/ /usr/share/nginx/html/

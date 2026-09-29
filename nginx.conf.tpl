@@ -39,7 +39,7 @@ server {
     add_header Cache-Control "no-cache" always;
     add_header Referrer-Policy strict-origin-when-cross-origin always;
     # im-web is a remote application of the nucleagent-web shell, so it must be
-    # framable by that origin and nothing else. SHELL_ORIGIN is substituted by
-    # nginx's /etc/nginx/templates envsubst at container start.
+    # framable by that origin and nothing else. FRAME_ANCESTORS is substituted
+    # by the dedicated runtime script at container start.
     add_header Content-Security-Policy "frame-ancestors ${FRAME_ANCESTORS}" always;
 }

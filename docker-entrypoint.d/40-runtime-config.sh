@@ -43,8 +43,7 @@ done
 
 export FRAME_ANCESTORS
 
-# Substitute only our own placeholders — nginx's own $uri, $proxy_host and
-# $http_authorization must survive into the generated config untouched.
+# Substitute only our own placeholder; nginx's own variables must survive.
 envsubst '${FRAME_ANCESTORS}' \
-    < /etc/nginx/templates/nginx.conf.template \
+    < /etc/nginx/templates/nginx.conf.tpl \
     > /etc/nginx/conf.d/default.conf
