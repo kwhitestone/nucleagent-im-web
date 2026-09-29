@@ -16,6 +16,7 @@ ARG VITE_IM_BASE
 # The nucleagent-web shell origin. Embedded mode accepts session pushes from
 # this exact origin only (src/shell.ts), and nginx allows framing only from it.
 ARG VITE_SHELL_URL
+ARG VITE_SHELL_ALLOWED_ORIGINS=
 # The shell-owned AccountPopover remote module (UNI-ACCTUI), imported at
 # runtime; a shell deploy updates it with no im-web rebuild. Empty: the
 # identity card shows avatar + name only.
@@ -29,6 +30,7 @@ RUN test -n "${VITE_AUTH_BASE}" && test -n "${VITE_IM_BASE}" && test -n "${VITE_
     VITE_AUTH_BASE="${VITE_AUTH_BASE}" \
     VITE_IM_BASE="${VITE_IM_BASE}" \
     VITE_SHELL_URL="${VITE_SHELL_URL}" \
+    VITE_SHELL_ALLOWED_ORIGINS="${VITE_SHELL_ALLOWED_ORIGINS}" \
     VITE_ACCOUNT_UI_URL="${VITE_ACCOUNT_UI_URL}" \
     npm run build
 
@@ -40,7 +42,9 @@ ARG VITE_SHELL_URL
 # baked Vite origin above. Mirrors nucleagent-core-web's Dockerfile.
 ENV SHELL_ORIGIN=${VITE_SHELL_URL}
 
-COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY nginx.conf.template /etc/nginx/templates/nginx.conf.template
+COPY docker-entrypoint.d/40-runtime-config.sh /docker-entrypoint.d/40-runtime-config.sh
+RUN chmod 0555 /docker-entrypoint.d/40-runtime-config.sh
 COPY --from=web-build /build/dist/ /usr/share/nginx/html/
 
 EXPOSE 8080

@@ -42,6 +42,8 @@ const message = (appId: string, instanceId: string, type: string, payload?: unkn
 export interface RemoteChildChannelOptions {
   appId: string;
   hostOrigin: string;
+  /** Comma-separated exact host origins; omitted/empty preserves hostOrigin. */
+  allowedHostOrigins?: string;
   parent: RemoteMessageTarget;
   messages: RemoteMessageCapabilities;
   onMessage?: Receiver;
@@ -52,6 +54,17 @@ export interface RemoteChildChannelOptions {
 export function createRemoteChildChannel(options: RemoteChildChannelOptions) {
   if (!/^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/.test(options.appId)) throw new Error("Invalid remote child ID");
   if (new URL(options.hostOrigin).origin !== options.hostOrigin || !/^https?:\/\//.test(options.hostOrigin)) throw new Error("Invalid remote host origin");
+  const allowedOrigins = new Set<string>();
+  for (const entry of (options.allowedHostOrigins || options.hostOrigin).split(",")) {
+    const value = entry.trim();
+    if (!value) continue;
+    try {
+      const origin = new URL(value).origin;
+      if (/^https?:\/\//.test(origin)) allowedOrigins.add(origin);
+    } catch { /* Invalid entries never broaden trust. */ }
+  }
+  // Bind replies and all later messages to the verified parent's first init.
+  let activeOrigin: string | undefined;
   validateMessageCapabilities(options.messages);
   const capabilities = structuredClone(options.messages);
   let instanceId: string | undefined;
@@ -59,19 +72,20 @@ export function createRemoteChildChannel(options: RemoteChildChannelOptions) {
   let connected = false;
   let disposed = false;
   const acknowledge = () => {
-    if (!mounted || !instanceId || disposed) return;
+    if (!mounted || !instanceId || !activeOrigin || disposed) return;
     connected = true;
-    options.parent.postMessage(message(options.appId, instanceId, "child:ready"), options.hostOrigin);
+    options.parent.postMessage(message(options.appId, instanceId, "child:ready"), activeOrigin);
     options.onConnected?.();
   };
   return {
     get connected(): boolean { return connected && !disposed; },
     ready(): void { if (disposed) throw new Error("Remote child channel is disposed"); mounted = true; acknowledge(); },
     receive(event: RemoteMessageEvent): boolean {
-      if (disposed || event.source !== options.parent || event.origin !== options.hostOrigin || !envelope(event.data)) return false;
+      if (disposed || event.source !== options.parent || !allowedOrigins.has(event.origin) || (activeOrigin !== undefined && event.origin !== activeOrigin) || !envelope(event.data)) return false;
       const data = event.data;
       if (data.appId !== options.appId || data.version !== REMOTE_PROTOCOL_VERSION) return false;
       if (data.type === "host:init") {
+        activeOrigin = event.origin;
         connected = false;
         instanceId = data.instanceId;
         acknowledge();
@@ -82,8 +96,8 @@ export function createRemoteChildChannel(options: RemoteChildChannelOptions) {
       return true;
     },
     send(type: string, payload?: unknown): boolean {
-      if (!connected || disposed || !instanceId || !capabilities.fromChild.includes(type)) return false;
-      options.parent.postMessage(message(options.appId, instanceId, type, payload), options.hostOrigin);
+      if (!connected || disposed || !instanceId || !activeOrigin || !capabilities.fromChild.includes(type)) return false;
+      options.parent.postMessage(message(options.appId, instanceId, type, payload), activeOrigin);
       return true;
     },
     dispose(): void { disposed = true; connected = false; instanceId = undefined; }

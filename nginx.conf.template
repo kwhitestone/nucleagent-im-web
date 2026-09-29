@@ -41,5 +41,5 @@ server {
     # im-web is a remote application of the nucleagent-web shell, so it must be
     # framable by that origin and nothing else. SHELL_ORIGIN is substituted by
     # nginx's /etc/nginx/templates envsubst at container start.
-    add_header Content-Security-Policy "frame-ancestors ${SHELL_ORIGIN}" always;
+    add_header Content-Security-Policy "frame-ancestors ${FRAME_ANCESTORS}" always;
 }
