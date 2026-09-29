@@ -256,6 +256,9 @@ textarea:focus {
   display: grid;
   grid-template-columns: 72px var(--im-list-w) minmax(0, 1fr);
   height: 100vh;
+  /* Phone browsers: 100vh includes the collapsible URL bar, so the rail sat
+     under it. dvh is the visible height; 100vh stays as the fallback. */
+  height: 100dvh;
   overflow: hidden;
   background: var(--bg-card);
 }
@@ -462,9 +465,16 @@ textarea:focus {
   font-size: 12px;
 }
 
+/* Slot-filling panels (UNI-IM-LAYOUT). Every column is a flex column whose
+ * one scrolling child takes `flex: 1; min-height: 0; overflow-y: auto`; the
+ * chrome around it stays `flex: none`. Not a fixed-row grid: the sidebar has
+ * optional children (the phone connbar), and a row template that counts
+ * children hands the 1fr to the wrong one — the list collapsed to 0px on a
+ * disconnected phone. tests/layout.test.ts enforces this for every panel. */
 .sidebar {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   min-width: 0;
   border-right: 1px solid var(--border);
   background: var(--bg-card);
@@ -515,11 +525,50 @@ textarea:focus {
   box-shadow: 0 0 6px var(--emerald-400);
 }
 
+.sidebar-header,
+.connbar,
+.sidebar-tools {
+  flex: none;
+}
+
 .sidebar-tools {
   display: grid;
   gap: 8px;
   padding: 12px;
   border-bottom: 1px solid var(--border);
+}
+
+/* An open directory list replaces the conversation list and takes the rest of
+ * the column — a full-height list panel, not a 240px floating card over a void. */
+.sidebar-tools:has(.contact-results) {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.sidebar-tools .contact-results {
+  border-bottom: 0;
+  border-radius: var(--r-md) var(--r-md) 0 0;
+}
+
+.sidebar-tools:has(.contact-results) > :not(.contact-picker),
+.sidebar:has(.sidebar-tools .contact-results) .conversation-list {
+  display: none;
+}
+
+.sidebar-tools .contact-picker {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sidebar-tools .contact-results {
+  flex: 1;
+  max-height: none;
 }
 
 .new-group,
@@ -538,6 +587,7 @@ textarea:focus {
 }
 
 .conversation-list {
+  flex: 1;
   min-height: 0;
   overflow-y: auto;
 }
@@ -716,12 +766,19 @@ textarea:focus {
 
 /* ---------- chat ---------- */
 
+/* Same slot-filling pattern as .sidebar: one flex:1 scroller (.messages or an
+ * empty state), chrome flex:none. */
 .chat {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
   background: var(--bg);
+}
+
+.chat-header,
+.composer {
+  flex: none;
 }
 
 .chat-header {
@@ -755,9 +812,12 @@ textarea:focus {
 .empty-chat,
 .empty-paths {
   display: grid;
-  align-self: center;
+  flex: 1;
+  min-height: 0;
+  align-content: center;
   justify-items: center;
   padding: 32px;
+  overflow-y: auto;
   color: var(--text-secondary);
   text-align: center;
 }
@@ -839,6 +899,7 @@ textarea:focus {
 }
 
 .messages {
+  flex: 1;
   min-height: 0;
   padding: 20px clamp(16px, 3vw, 44px);
   overflow-y: auto;
@@ -1140,13 +1201,12 @@ kbd {
   width: 100%;
 }
 
+/* In flow, never floating: in the sidebar it fills the column (above); in the
+ * group dialog it is a bounded list inside the dialog's own scroll body. */
 .contact-results {
-  position: absolute;
-  z-index: 5;
-  top: calc(100% + 5px);
-  right: 0;
-  left: 0;
+  min-height: 0;
   max-height: 240px;
+  margin-top: 5px;
   overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
@@ -1496,7 +1556,7 @@ kbd {
   }
 
   .app-shell.show-chat .chat {
-    display: grid;
+    display: flex;
   }
 
   .chat-header .back {
@@ -1510,13 +1570,6 @@ kbd {
 
   .conversation {
     min-height: 64px;
-  }
-
-  .contact-results {
-    position: fixed;
-    top: calc(var(--topbar-h) + 52px);
-    right: 8px;
-    left: 8px;
   }
 
   .message {
