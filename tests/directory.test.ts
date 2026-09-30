@@ -112,7 +112,7 @@ test("browse list renders both badges and 加载更多 while more pages remain",
     browseItems: [person(5, true), person(9, false)] });
   assert.match(html, /data-testid="im-directory-browse"/);
   assert.match(html, /P05[\s\S]*@u5 · UID 5/, "joined: username + uid");
-  assert.match(html, /P09[\s\S]*尚未加入/, "portal-only: not-joined badge");
+  assert.match(html, /P09[\s\S]*企业账号 · 尚未加入/, "portal-only: enterprise + not-joined");
   assert.match(html, /account-badge portal/);
   assert.match(html, /加载更多/);
   assert.doesNotMatch(html, /已显示全部/);
@@ -143,4 +143,20 @@ test("typing leaves browse for search; directory off keeps the picker search-onl
   assert.doesNotMatch(off, /im-directory-browse/);
   const closed = await renderPicker({ browseLoaded: true, browseItems: [person(1, true)] });
   assert.doesNotMatch(closed, /im-directory-browse/, "closed until the box is focused");
+});
+
+test("picker sub-line reads the resolved @username, else 企业账号, then the UID (IMUX4)", async () => {
+  const { ensureNames, resetNames } = await import("../src/names.ts");
+  const f = stubFetch([[200, { code: 0, message: "success", data: { degraded: false, items: [
+    { uid: 5, profile: { nickName: "P05", avatar: "", accountType: "human", provisioned: true, username: "real.five", enterprise: true } },
+    { uid: 6, profile: { nickName: "P06", avatar: "", accountType: "human", provisioned: true, username: null, enterprise: true } },
+  ] } }]]);
+  try {
+    await ensureNames(["5", "6"], session);
+    const row6 = { ...person(6, true), username: "portal_66" };
+    const html = await renderPicker({ open: true, browseLoaded: true, browseItems: [person(5, true), row6] });
+    assert.match(html, /P05[\s\S]*@real\.five · UID 5/, "resolved handle beats the row's u5");
+    assert.match(html, /P06[\s\S]*企业账号 · UID 6/, "no real handle: Enterprise");
+    assert.doesNotMatch(html, /portal_66/);
+  } finally { f.restore(); resetNames(); }
 });

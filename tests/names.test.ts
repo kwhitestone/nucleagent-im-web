@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ConnectSession } from "../src/api.ts";
-import { accountTypeOf, ensureNames, isMissing, isRealName, nameFor, resetNames } from "../src/names.ts";
+import { accountTypeOf, ensureNames, handleFor, isEnterprise, isMissing, isRealName, nameFor, resetNames } from "../src/names.ts";
 
 const alice: ConnectSession = { uid: "1", token: "im", wsAddr: "ws://im", jwt: "jwt-a" };
 const bob: ConnectSession = { uid: "2", token: "im", wsAddr: "ws://im", jwt: "jwt-b" };
@@ -89,5 +89,26 @@ test("an account switch drops the previous account's names", async () => {
     assert.equal(nameFor("7"), "A7");
     await ensureNames([], bob);
     assert.equal(nameFor("7"), "", "bob's session starts clean");
+  } finally { f.restore(); }
+});
+
+// UNI-IMUX4: resolve returns username + enterprise; the handle is never portal_*.
+test("handle and enterprise come from resolve; a null username beats a stale stored one", async () => {
+  const f = stubFetch(() => ok([
+    { uid: 11, profile: { ...profile("碧"), username: "bi.w", enterprise: true } },
+    { uid: 12, profile: { ...profile("Kim"), username: null, enterprise: false } },
+    { uid: 13, profile: profile("Old auth") }, // pre-IMUX4 auth: fields absent
+  ]));
+  try {
+    assert.equal(handleFor("11", "portal_x"), "", "unresolved: a portal_* stored name is no handle");
+    assert.equal(handleFor("11", "stored"), "stored", "unresolved: a real stored username is");
+    assert.equal(isEnterprise("11"), undefined);
+    await ensureNames(["11", "12", "13"], alice);
+    assert.equal(handleFor("11"), "bi.w");
+    assert.equal(isEnterprise("11"), true);
+    assert.equal(handleFor("12", "old.name"), "", "resolved null wins over the row");
+    assert.equal(isEnterprise("12"), false);
+    assert.equal(handleFor("13", "row.name"), "row.name", "older auth: falls back to the row");
+    assert.equal(isEnterprise("13"), undefined);
   } finally { f.restore(); }
 });

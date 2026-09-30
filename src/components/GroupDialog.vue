@@ -16,7 +16,7 @@ import {
 } from "../api";
 import { useI18n } from "vue-i18n";
 import ContactPicker from "./ContactPicker.vue";
-import { ensureNames, isRealName, nameFor } from "../names";
+import { ensureNames, handleFor, nameFor } from "../names";
 import type { ProfileTarget } from "../accountPopover";
 
 const props = defineProps<{
@@ -283,7 +283,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", closeOnEscape));
                   </button>
                   <small>
                     {{ member.accountType === "agent" ? t("badge.agent")
-                      : isRealName(member.username) ? `@${member.username}` : t("badge.person") }}
+                      : handleFor(String(member.uid), member.username) ? `@${handleFor(String(member.uid), member.username)}` : t("badge.person") }}
                     <template v-if="member.uid === group.creatorUid">· {{ t("group.owner") }}</template>
                   </small>
                 </span>

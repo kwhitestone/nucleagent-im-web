@@ -8,6 +8,7 @@ import { computed, onBeforeUnmount, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { useAccountPopover } from "../accountPopover";
 import { getLocale } from "../i18n";
+import { accountTypeOf, handleFor, isEnterprise } from "../names";
 
 const props = defineProps<{
   uid: string;
@@ -34,7 +35,11 @@ async function onClick(): Promise<void> {
     return;
   }
   const shown = chip.value && await popover.open(chip.value, {
-    user: { nickName: props.displayName?.trim() ?? "", headerImg: props.avatar ?? "", uid: props.uid },
+    user: {
+      nickName: props.displayName?.trim() ?? "", headerImg: props.avatar ?? "", uid: props.uid,
+      // Self is in the resolve batch, so the popover's @username / kind rows need no extra call.
+      username: handleFor(props.uid) || undefined, accountType: accountTypeOf(props.uid), enterprise: isEnterprise(props.uid),
+    },
     locale: getLocale(),
     manageAccount: () => emit("account"),
     logout: () => emit("logout"),

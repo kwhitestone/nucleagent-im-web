@@ -37,6 +37,18 @@ export function accountTypeOf(uid: string): ResolvedProfile["accountType"] | und
   return known.get(uid)?.accountType;
 }
 
+/** The @handle to show: resolved username, else a real stored one; "" for none (never portal_*). */
+export function handleFor(uid: string, stored?: string): string {
+  const resolved = known.get(uid)?.username;
+  const value = resolved !== undefined ? resolved ?? "" : stored ?? "";
+  return isRealName(value) ? value.trim() : "";
+}
+
+/** Enterprise (portal-linked) per resolve; undefined when not known (older auth, not resolved yet). */
+export function isEnterprise(uid: string): boolean | undefined {
+  return known.get(uid)?.enterprise ?? undefined;
+}
+
 /** Sign-out / account switch: one account's names never render in another's session. */
 export function resetNames(): void {
   known.clear();

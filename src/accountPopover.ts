@@ -8,7 +8,11 @@ import { outerAware } from "./outerHost.ts";
 import { authBase, type ConnectSession } from "./api.ts";
 
 export interface AccountPopoverParams {
-  user: { nickName: string; headerImg: string; uid: number | string; roles?: string[] };
+  user: {
+    nickName: string; headerImg: string; uid: number | string; roles?: string[];
+    /** UNI-IMUX4 popover rows (board §05): @username and account kind. */
+    username?: string; accountType?: "human" | "agent"; enterprise?: boolean;
+  };
   logout: () => Promise<void> | void;
   manageAccount: () => void;
   locale: "zh" | "en";

@@ -10,7 +10,7 @@ import {
   type Contact,
   type DirectoryEntry,
 } from "../api";
-import { ensureNames, isRealName, nameFor } from "../names";
+import { ensureNames, handleFor, isEnterprise, nameFor } from "../names";
 import type { ProfileTarget } from "../accountPopover";
 
 const { t } = useI18n();
@@ -160,10 +160,13 @@ function rowName(contact: Contact): string {
     || contact.displayName || contact.username;
 }
 
-// A portal account's username is a random portal_<uuid>: not worth a line.
+// Board §04: the least needed to tell same-named people apart — the real
+// @username (resolved; never portal_<uuid>), else "Enterprise"; then the UID.
 function rowSub(contact: Contact): string {
-  const uid = `${t("badge.uid")} ${contact.id}`;
-  return isRealName(contact.username) ? `@${contact.username} · ${uid}` : uid;
+  const uid = String(contact.id);
+  const handle = handleFor(uid, contact.username);
+  const lead = handle ? `@${handle}` : isEnterprise(uid) ? t("badge.enterprise") : "";
+  return [lead, `${t("badge.uid")} ${uid}`].filter(Boolean).join(" · ");
 }
 
 function entryKey(entry: DirectoryEntry): string {
@@ -195,7 +198,7 @@ function inspect(entry: DirectoryEntry, anchor: HTMLElement): void {
     uid: entry.provisioned ? String(entry.id) : "",
     portalUid: entry.provisioned ? undefined : entry.portalUid,
     known: {
-      nickName: rowName(entry), username: entry.username,
+      nickName: rowName(entry), username: entry.username, avatar: entry.avatar,
       accountType: entry.accountType, provisioned: entry.provisioned,
     },
     select: () => void choose(entry),
@@ -246,7 +249,7 @@ onBeforeUnmount(() => {
           <span>
             <strong>{{ rowName(contact) }}</strong>
             <small v-if="contact.provisioned">{{ rowSub(contact) }}</small>
-            <small v-else>{{ t("badge.notJoined") }}</small>
+            <small v-else>{{ t("badge.enterprise") }} · {{ t("badge.notJoined") }}</small>
           </span>
           <span class="account-badge" :class="contact.provisioned ? contact.accountType : 'portal'">
             {{ contact.accountType === "agent" ? t("badge.agent") : t("badge.person") }}
@@ -281,7 +284,7 @@ onBeforeUnmount(() => {
             <!-- UID stays as secondary text: the only way to tell duplicate names
                  apart, and it quietly teaches that a UID is shareable. -->
             <small v-if="contact.provisioned">{{ rowSub(contact) }}</small>
-            <small v-else>{{ t("badge.notJoined") }}</small>
+            <small v-else>{{ t("badge.enterprise") }} · {{ t("badge.notJoined") }}</small>
           </span>
           <span class="account-badge" :class="contact.provisioned ? contact.accountType : 'portal'">
             {{ contact.accountType === "agent" ? t("badge.agent") : t("badge.person") }}

@@ -66,6 +66,7 @@ export default {
     person: "联系人",
     agentCount: "智能体 ×{count}",
     uid: "UID",
+    enterprise: "企业账号",
     via: "经 {'@'}{name} 转交",
     notJoined: "尚未加入，对方首次登录后即可看到消息",
   },

@@ -52,7 +52,7 @@ import {
   loadCachedProfile,
   saveCachedProfile,
 } from "./profile";
-import { accountTypeOf, ensureNames, isMissing, nameFor, resetNames } from "./names";
+import { accountTypeOf, ensureNames, handleFor, isEnterprise, isMissing, nameFor, resetNames } from "./names";
 import ContactPicker from "./components/ContactPicker.vue";
 import GroupDialog from "./components/GroupDialog.vue";
 import IdentityCard from "./components/IdentityCard.vue";
@@ -203,6 +203,16 @@ const totalUnread = computed(
 const isFirstRun = computed(
   () => !sortedConversations.value.length && !groups.value.length,
 );
+
+// Board §03 anno 1: a DM header's sub-line is "@username · Enterprise" when known.
+const directMeta = computed(() => {
+  const channel = activeChannel.value;
+  if (channel?.channelType !== ChannelTypePerson) return "";
+  const contact = knownContacts.value.find((item) => String(item.id) === channel.channelID);
+  const handle = handleFor(channel.channelID, contact?.username);
+  const enterprise = !isAgentUid(channel.channelID) && isEnterprise(channel.channelID);
+  return [handle && `@${handle}`, enterprise && t("badge.enterprise")].filter(Boolean).join(" · ");
+});
 
 const activeGroupMeta = computed(() => {
   const agents = activeAgents.value.length;
@@ -1248,7 +1258,7 @@ onBeforeUnmount(() => {
           <span v-if="activeChannel">
             {{ activeChannel.channelType === ChannelTypeGroup
               ? activeGroupMeta
-              : t("chat.directMessage") }}
+              : directMeta || t("chat.directMessage") }}
           </span>
         </div>
         <div class="chat-actions">

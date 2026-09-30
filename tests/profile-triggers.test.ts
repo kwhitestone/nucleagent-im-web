@@ -82,3 +82,27 @@ test("group dialog preselects people passed by the card's Add to group", () => {
   assert.match(dialog, /const selected = ref<Contact\[\]>\(\[\.\.\.\(props\.preselect \?\? \[\]\)\]\);/);
   assert.match(app, /onAddToGroup: !can\.addToGroup \? undefined : \(\) => \{[\s\S]*?showCreateGroup\(\[contact\(\)\]\)/);
 });
+
+// UNI-IMUX4: the DM header sub-line (board §03 anno 1) and the rail's own
+// popover rows (board §05) read @username / Enterprise from the resolve cache.
+test("DM header sub-line is '@username · Enterprise' from resolve, else the old label", () => {
+  assert.match(app, /const directMeta = computed\(\(\) => \{[\s\S]*?handleFor\(channel\.channelID, contact\?\.username\)[\s\S]*?isEnterprise\(channel\.channelID\)/);
+  assert.match(app, /: directMeta \|\| t\("chat\.directMessage"\)/);
+  assert.match(app, /!isAgentUid\(channel\.channelID\) && isEnterprise/, "agents never read Enterprise");
+});
+
+test("rail Me: the popover gets @username, account kind and enterprise from the resolve cache", async () => {
+  const { ensureNames, resetNames } = await import("../src/names.ts");
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ code: 0, data: { degraded: false, items: [
+    { uid: 1, profile: { nickName: "赖碧威", avatar: "", accountType: "human", provisioned: true, username: null, enterprise: true } },
+  ] } }), { status: 200 });
+  try {
+    await ensureNames(["1"], session);
+  } finally { globalThis.fetch = original; }
+  const card = readFileSync("src/components/IdentityCard.vue", "utf8");
+  assert.match(card, /username: handleFor\(props\.uid\) \|\| undefined, accountType: accountTypeOf\(props\.uid\), enterprise: isEnterprise\(props\.uid\)/);
+  const { handleFor, isEnterprise, accountTypeOf } = await import("../src/names.ts");
+  assert.deepEqual([handleFor("1"), accountTypeOf("1"), isEnterprise("1")], ["", "human", true], "portal self: no handle, Enterprise");
+  resetNames();
+});

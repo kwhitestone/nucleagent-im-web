@@ -211,6 +211,8 @@ export async function searchContacts(
 export interface DirectoryEntry extends Contact {
   portalUid?: number;
   provisioned: boolean;
+  /** B2 (UNI-IMUX4): https avatar, "" when none. Absent on an older auth. */
+  avatar?: string;
 }
 
 export interface DirectoryPage {
@@ -273,6 +275,10 @@ export interface ResolvedProfile {
   avatar: string;
   accountType: "human" | "agent";
   provisioned: boolean;
+  /** UNI-IMUX4: the real login handle; null = none to show (portal_<uuid>). Absent on an older auth. */
+  username?: string | null;
+  /** UNI-IMUX4: portal-linked (enterprise) account; null = unknown. */
+  enterprise?: boolean | null;
 }
 
 export interface ResolvedUser {

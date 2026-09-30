@@ -66,6 +66,7 @@ export default {
     person: "Person",
     agentCount: "{count} agents",
     uid: "UID",
+    enterprise: "Enterprise",
     via: "via {'@'}{name}",
     notJoined: "Hasn't joined yet — they'll see your message on first sign-in",
   },
