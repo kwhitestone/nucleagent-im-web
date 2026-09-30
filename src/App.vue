@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, shallowRef } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   Channel,
@@ -52,6 +52,7 @@ import {
   loadCachedProfile,
   saveCachedProfile,
 } from "./profile";
+import { accountTypeOf, ensureNames, isMissing, nameFor, resetNames } from "./names";
 import ContactPicker from "./components/ContactPicker.vue";
 import GroupDialog from "./components/GroupDialog.vue";
 import IdentityCard from "./components/IdentityCard.vue";
@@ -88,11 +89,9 @@ const connection = ref<ConnectionState>("disconnected");
 type RailMode = "all" | "groups" | "agents";
 const railMode = ref<RailMode>("all");
 const searchOpen = ref(false);
-// This account's own display name, read from auth's user-info endpoint. Empty
-// is the normal case for a portal account today: auth decodes only {id, openId}
-// from the portal response and stores "Portal user <uid>", which profile.ts
-// treats as absent. The identity card then shows its own fallback. See
-// profile.ts for where the real name is stranded and what has to change.
+// This account's own display name, read from auth's user-info endpoint.
+// "Portal user <uid>" is treated as absent (profile.ts); the rail card then
+// uses the batch-resolved nickName, and a skeleton until that lands.
 const profileName = ref("");
 const profileAvatar = ref("");
 const conversations = shallowRef<Conversation[]>([]);
@@ -133,11 +132,30 @@ const activeTitle = computed(() => {
   const channel = activeChannel.value;
   if (!channel) return t("empty.pickConversation");
   if (channel.channelType === ChannelTypeGroup) {
-    return activeGroup.value?.title || `${t("chat.groupChat")} ${channel.channelID}`;
+    return activeGroup.value?.title || t("chat.groupChat");
   }
-  // Falls through to the raw UID on purpose: the row template pairs it with a
-  // "no name yet" sub-line so a bare number never reads as a bug.
-  return contactName(channel.channelID) || channel.channelID;
+  // "" = still resolving: the header renders a skeleton, never the UID.
+  return personName(channel.channelID);
+});
+
+// Every UID the screen can show, resolved to a nickName in one batched call
+// (auth directory/resolve). Known and in-flight UIDs are skipped, so this is
+// a no-op on most recomputes. Resolution never provisions anyone.
+const visibleUids = computed(() => {
+  const uids = new Set<string>();
+  if (session.value) uids.add(session.value.uid);
+  for (const conversation of conversations.value) {
+    if (conversation.channel.channelType === ChannelTypePerson) uids.add(conversation.channel.channelID);
+    if (conversation.lastMessage?.fromUID) uids.add(conversation.lastMessage.fromUID);
+  }
+  for (const message of messages.value) if (message.fromUID) uids.add(message.fromUID);
+  for (const member of activeGroupMembers.value) uids.add(String(member.uid));
+  for (const response of liveResponses.value) uids.add(response.agentUid);
+  if (activeChannel.value?.channelType === ChannelTypePerson) uids.add(activeChannel.value.channelID);
+  return [...uids];
+});
+watch(visibleUids, (uids) => {
+  if (session.value) void ensureNames(uids, session.value);
 });
 const dialUidValid = computed(() => isDialableUid(dialUid.value));
 const sortedConversations = computed(() =>
@@ -153,6 +171,10 @@ const knownAgentUids = computed(
   ),
 );
 
+function isAgentUid(uid: string): boolean {
+  return knownAgentUids.value.has(uid) || accountTypeOf(uid) === "agent";
+}
+
 // The rail filters the one list rather than fetching different ones: conversations
 // already carry their channel type, so this is a view concern only.
 const visibleConversations = computed(() => {
@@ -164,7 +186,7 @@ const visibleConversations = computed(() => {
   if (railMode.value === "agents") {
     return sortedConversations.value.filter(
       (item) => item.channel.channelType === ChannelTypePerson
-        && knownAgentUids.value.has(item.channel.channelID),
+        && isAgentUid(item.channel.channelID),
     );
   }
   return sortedConversations.value;
@@ -198,28 +220,27 @@ function conversationSubtitle(conversation: Conversation): string {
   const body = messageText(last);
   if (isOwnMessage(last)) return `${t("list.you")} ${body}`;
   // Group previews name the speaker; a direct chat's speaker is already the row.
+  // Until the speaker resolves the preview is just the body, never their UID.
   if (conversation.channel.channelType === ChannelTypeGroup) {
-    const who = contactName(last.fromUID);
+    const who = personName(last.fromUID);
     if (who) return `${who}: ${body}`;
   }
   return body;
 }
 
-/** True when a row shows a bare UID because no name has resolved yet. */
-function isUnnamed(conversation: Conversation): boolean {
-  return conversation.channel.channelType === ChannelTypePerson
-    && !contactName(conversation.channel.channelID);
+/** True while a person row's nickName is still resolving (renders a skeleton). */
+function isResolving(conversation: Conversation): boolean {
+  return conversation.channel.channelType === ChannelTypePerson && !conversationTitle(conversation);
 }
 
 function isAgentConversation(conversation: Conversation): boolean {
   return conversation.channel.channelType === ChannelTypePerson
-    && knownAgentUids.value.has(conversation.channel.channelID);
+    && isAgentUid(conversation.channel.channelID);
 }
 
 function conversationInitial(conversation: Conversation): string {
   if (conversation.channel.channelType === ChannelTypeGroup) return "#";
-  const name = conversationTitle(conversation);
-  return isUnnamed(conversation) ? "?" : [...name][0]?.toUpperCase() || "?";
+  return [...conversationTitle(conversation)][0]?.toUpperCase() || "";
 }
 
 function conversationTime(conversation: Conversation): string {
@@ -292,14 +313,24 @@ function conversationTitle(conversation: Conversation): string {
   const channel = conversation.channel;
   if (channel.channelType === ChannelTypeGroup) {
     return groups.value.find((group) => group.wukongChannelId === channel.channelID)?.title
-      || channel.channelID;
+      || t("chat.groupChat");
   }
-  return contactName(channel.channelID) || channel.channelID;
+  return personName(channel.channelID);
+}
+
+/**
+ * The one naming rule (UNI-IMUX2): the resolved nickName, else a real name we
+ * already hold. "" means still resolving and renders as a skeleton; a UID is
+ * never shown in its place. A uid with no account at all says exactly that.
+ */
+function personName(uid: string): string {
+  if (isMissing(uid)) return t("profile.noAccount");
+  const member = activeGroupMembers.value.find((item) => String(item.uid) === uid);
+  return nameFor(uid, member?.displayName, contactName(uid), member?.username);
 }
 
 function agentName(uid: string): string {
-  const member = activeGroupMembers.value.find((item) => String(item.uid) === uid);
-  return member?.displayName || member?.username || contactName(uid) || t("badge.agent");
+  return personName(uid) || t("badge.agent");
 }
 
 function isAgentMessage(message: Message): boolean {
@@ -467,7 +498,7 @@ function startSession(nextSession: ConnectSession): void {
 }
 
 // A failed profile read is not worth surfacing: the identity card falls back to
-// "Portal user <uid>", and blocking or alarming the user over a display name
+// the resolved nickName, and blocking or alarming the user over a display name
 // they did not ask for would be worse than the missing name.
 async function loadProfile(forSession: ConnectSession): Promise<void> {
   const profile = await fetchProfile(forSession);
@@ -725,8 +756,7 @@ function openContact(contact: Contact): void {
   void openChannel(new Channel(String(contact.id), ChannelTypePerson));
 }
 
-// No endpoint resolves a UID to a name, so a dialled conversation shows the UID until that
-// person is seen in a search or a shared group. Opening the channel is the whole feature.
+// A dialled UID is named by the same batch resolver as every other row.
 function dialUidOpen(): void {
   if (!dialUidValid.value) return;
   const uid = dialUid.value.trim();
@@ -843,6 +873,7 @@ function teardownSession(): void {
   conversations.value = [];
   groups.value = [];
   knownContacts.value = [];
+  resetNames();
   profileName.value = "";
   profileAvatar.value = "";
   dialOpen.value = false;
@@ -1006,7 +1037,7 @@ onBeforeUnmount(() => {
       <IdentityCard
         v-if="session"
         :uid="session.uid"
-        :display-name="profileName"
+        :display-name="profileName || nameFor(session.uid)"
         :avatar="profileAvatar"
         @account="openAccount"
         @logout="signOut"
@@ -1087,26 +1118,19 @@ onBeforeUnmount(() => {
             :class="{
               group: conversation.channel.channelType === ChannelTypeGroup,
               bot: isAgentConversation(conversation),
-              unnamed: isUnnamed(conversation),
+              unnamed: isResolving(conversation),
             }"
           >{{ conversationInitial(conversation) }}</span>
           <span class="conversation-copy">
             <span class="conversation-name">
-              <strong :class="{ mono: isUnnamed(conversation) }">
-                {{ conversationTitle(conversation) }}
-              </strong>
+              <!-- nickName is mandatory: while it resolves, a skeleton — never the UID. -->
+              <strong v-if="isResolving(conversation)" class="name-skeleton" data-testid="im-name-skeleton" :aria-label="t('chat.loading')" />
+              <strong v-else>{{ conversationTitle(conversation) }}</strong>
               <span v-if="isAgentConversation(conversation)" class="tag agent">
                 {{ t("badge.agent") }}
               </span>
-              <span v-else-if="isUnnamed(conversation)" class="tag uid">{{ t("badge.uid") }}</span>
             </span>
-            <!-- A row that resolves to a bare UID says why, so the number does
-                 not read as a broken name. -->
-            <small>
-              {{ isUnnamed(conversation) && !conversation.lastMessage
-                ? t("list.noNameYet")
-                : conversationSubtitle(conversation) || t("empty.noMessages") }}
-            </small>
+            <small>{{ conversationSubtitle(conversation) || t("empty.noMessages") }}</small>
           </span>
           <span class="conversation-end">
             <span class="conversation-time">{{ conversationTime(conversation) }}</span>
@@ -1155,7 +1179,8 @@ onBeforeUnmount(() => {
           ‹
         </button>
         <div>
-          <h2>{{ activeTitle }}</h2>
+          <h2 v-if="activeTitle">{{ activeTitle }}</h2>
+          <h2 v-else class="name-skeleton wide" :aria-label="t('chat.loading')" />
           <span v-if="activeChannel">
             {{ activeChannel.channelType === ChannelTypeGroup
               ? activeGroupMeta
@@ -1212,7 +1237,9 @@ onBeforeUnmount(() => {
             :class="{ own: isOwnMessage(message), agent: isAgentMessage(message) }"
           >
             <span class="sender">
-              {{ isOwnMessage(message) ? t("chat.you") : (contactName(message.fromUID) || message.fromUID) }}
+              <template v-if="isOwnMessage(message)">{{ t("chat.you") }}</template>
+              <template v-else-if="personName(message.fromUID)">{{ personName(message.fromUID) }}</template>
+              <span v-else class="name-skeleton" :aria-label="t('chat.loading')" />
               <span v-if="isAgentMessage(message)" class="tag agent">{{ t("badge.agent") }}</span>
               <span v-if="relayLabel(message)" class="tag relay">{{ relayLabel(message) }}</span>
             </span>

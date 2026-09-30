@@ -45,7 +45,6 @@ export default {
     recent: "最近",
     searchPlaceholder: "搜索姓名、{'@'}用户名 或 UID",
     you: "你:",
-    noNameYet: "尚未获得昵称，对方发言后自动补全",
     unreadLabel: "{count} 条未读",
     newGroup: "新建群聊",
   },
@@ -88,6 +87,10 @@ export default {
     dialPlaceholder: "输入 UID（纯数字）",
     open: "打开",
     invalid: "UID 必须是纯数字",
+  },
+  profile: {
+    // A uid with no account at all (never a nickName fallback, never the number).
+    noAccount: "无此账号",
   },
   me: {
     myUid: "我的 UID",

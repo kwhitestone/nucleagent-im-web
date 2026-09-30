@@ -10,6 +10,7 @@ import {
   type Contact,
   type DirectoryEntry,
 } from "../api";
+import { ensureNames, isRealName, nameFor } from "../names";
 
 const { t } = useI18n();
 
@@ -142,6 +143,26 @@ function closeOnOutside(event: PointerEvent): void {
 }
 if (typeof document !== "undefined") document.addEventListener("pointerdown", closeOnOutside);
 
+// Provisioned rows go through the same resolver as the conversation list, so a
+// directory-provisioned person who never logged in reads by their portal name
+// here too, not auth's stored "Portal user N".
+watch(() => [...results.value, ...browseItems.value], (items) => {
+  void ensureNames(items.filter((item) => item.id).map((item) => String(item.id)), props.session);
+});
+
+// Directory rows always carry a name (the server's own "Portal user N" floor
+// included), so the last resort is that stored name — never a UID.
+function rowName(contact: Contact): string {
+  return nameFor(String(contact.id), contact.displayName, contact.username)
+    || contact.displayName || contact.username;
+}
+
+// A portal account's username is a random portal_<uuid>: not worth a line.
+function rowSub(contact: Contact): string {
+  const uid = `${t("badge.uid")} ${contact.id}`;
+  return isRealName(contact.username) ? `@${contact.username} · ${uid}` : uid;
+}
+
 function entryKey(entry: DirectoryEntry): string {
   return `${entry.id}:${entry.portalUid ?? 0}`;
 }
@@ -197,10 +218,10 @@ onBeforeUnmount(() => {
         :key="contact.id"
         class="selection"
         type="button"
-        :aria-label="t('group.remove') + ' ' + (contact.displayName || contact.username)"
+        :aria-label="t('group.remove') + ' ' + rowName(contact)"
         @click="remove(contact)"
       >
-        {{ contact.displayName || contact.username }} <span aria-hidden="true">×</span>
+        {{ rowName(contact) }} <span aria-hidden="true">×</span>
       </button>
     </div>
     <!-- Browse mode: everyone, by name. Same rows and badges as search. -->
@@ -214,8 +235,8 @@ onBeforeUnmount(() => {
         @click="choose(contact)"
       >
         <span>
-          <strong>{{ contact.displayName || contact.username }}</strong>
-          <small v-if="contact.provisioned">@{{ contact.username }} · {{ t("badge.uid") }} {{ contact.id }}</small>
+          <strong>{{ rowName(contact) }}</strong>
+          <small v-if="contact.provisioned">{{ rowSub(contact) }}</small>
           <small v-else>{{ t("badge.notJoined") }}</small>
         </span>
         <span class="account-badge" :class="contact.provisioned ? contact.accountType : 'portal'">
@@ -243,10 +264,10 @@ onBeforeUnmount(() => {
         @click="choose(contact)"
       >
         <span>
-          <strong>{{ contact.displayName || contact.username }}</strong>
-          <!-- Both @username and UID: the only way to tell duplicate names
+          <strong>{{ rowName(contact) }}</strong>
+          <!-- UID stays as secondary text: the only way to tell duplicate names
                apart, and it quietly teaches that a UID is shareable. -->
-          <small v-if="contact.provisioned">@{{ contact.username }} · {{ t("badge.uid") }} {{ contact.id }}</small>
+          <small v-if="contact.provisioned">{{ rowSub(contact) }}</small>
           <small v-else>{{ t("badge.notJoined") }}</small>
         </span>
         <span class="account-badge" :class="contact.provisioned ? contact.accountType : 'portal'">

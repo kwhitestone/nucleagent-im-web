@@ -44,7 +44,6 @@ export default {
     recent: "Recent",
     searchPlaceholder: "Search name, {'@'}username or UID",
     you: "You:",
-    noNameYet: "No name yet — fills in once they speak",
     unreadLabel: "{count} unread",
     newGroup: "New group",
   },
@@ -88,6 +87,10 @@ export default {
     dialPlaceholder: "Enter a UID (digits only)",
     open: "Open",
     invalid: "A UID is digits only",
+  },
+  profile: {
+    // A uid with no account at all (never a nickName fallback, never the number).
+    noAccount: "No such account",
   },
   me: {
     myUid: "Your UID",

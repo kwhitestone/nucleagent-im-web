@@ -42,7 +42,7 @@ function store(): Storage | undefined {
 /**
  * True for a name the auth database invented because the portal profile was
  * discarded. Treated as absent so the identity card shows its own, clearer
- * "Portal user <uid>" fallback rather than presenting a placeholder as if the
+ * resolved nickName (or a skeleton) rather than presenting a placeholder as if the
  * user had chosen it.
  */
 export function isPlaceholderName(name: string): boolean {

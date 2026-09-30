@@ -11,7 +11,7 @@ import { getLocale } from "../i18n";
 
 const props = defineProps<{
   uid: string;
-  /** Empty until a profile is resolved; falls back to "Portal user <uid>". */
+  /** Empty until a profile is resolved; a skeleton shows meanwhile, never the UID. */
   displayName?: string;
   /** auth user-info headerImg; the popover shows only absolute http(s) URLs. */
   avatar?: string;
@@ -25,8 +25,8 @@ const popover = useAccountPopover();
 const open = ref(false);
 const chip = ref<HTMLElement>();
 
-const name = computed(() => props.displayName?.trim() || `Portal user ${props.uid}`);
-const initial = computed(() => [...name.value][0]?.toUpperCase() || "?");
+const name = computed(() => props.displayName?.trim() || "");
+const initial = computed(() => [...name.value][0]?.toUpperCase() || "");
 
 async function onClick(): Promise<void> {
   if (open.value) {
@@ -63,7 +63,10 @@ onBeforeUnmount(() => popover.close());
     <div v-if="open" class="identity-pop" role="dialog" data-testid="im-identity-fallback" :aria-label="t('me.openProfile')">
       <div class="identity-head">
         <span class="avatar round lg">{{ initial }}</span>
-        <span class="identity-name"><strong>{{ name }}</strong></span>
+        <span class="identity-name">
+          <strong v-if="name">{{ name }}</strong>
+          <strong v-else class="name-skeleton" :aria-label="t('chat.loading')" />
+        </span>
       </div>
     </div>
   </div>

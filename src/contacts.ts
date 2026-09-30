@@ -1,6 +1,6 @@
-// Conversations hydrate from WuKongIM, which only knows UIDs. No endpoint resolves a UID
-// to a name — contacts/search is a username/nick_name prefix match — so every name the app
-// does see is cached here and survives the reload that used to drop it.
+// Conversations hydrate from WuKongIM, which only knows UIDs. names.ts resolves them via
+// auth directory/resolve; this per-account cache of names already seen (search, groups)
+// lets a reload paint real names before that call returns.
 //
 // Display names only: no token, no credential, nothing that could resume a session.
 import type { Contact, GroupMember } from "./api";
@@ -77,7 +77,7 @@ export function contactsFromMembers(members: GroupMember[]): Contact[] {
 
 /**
  * The P1 fallback chain: a name we already know, else undefined so the caller can decide
- * how to render the bare UID. Never returns an empty string.
+ * how to render a name still resolving (a skeleton, never the UID). Never returns "".
  */
 export function resolveContactName(contacts: Contact[], uid: string): string | undefined {
   const contact = contacts.find((item) => String(item.id) === uid);

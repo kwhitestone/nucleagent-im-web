@@ -16,6 +16,7 @@ import {
 } from "../api";
 import { useI18n } from "vue-i18n";
 import ContactPicker from "./ContactPicker.vue";
+import { ensureNames, isRealName, nameFor } from "../names";
 
 const props = defineProps<{
   session: ConnectSession;
@@ -55,6 +56,7 @@ async function load(): Promise<void> {
   try {
     const data = await getGroupMembers(props.group.id, props.session);
     members.value = data.members;
+    void ensureNames(data.members.map((member) => String(member.uid)), props.session);
     if (isOwner.value) {
       const entries = await Promise.all(
         data.members
@@ -185,6 +187,12 @@ async function saveAllowlist(agentUid: number): Promise<void> {
   }
 }
 
+// Same naming rule as the conversation list: resolved nickName first.
+function memberName(member: GroupMember): string {
+  return nameFor(String(member.uid), member.displayName, member.username)
+    || member.displayName || member.username;
+}
+
 function closeOnEscape(event: KeyboardEvent): void {
   if (event.key === "Escape") emit("close");
 }
@@ -249,9 +257,10 @@ onBeforeUnmount(() => window.removeEventListener("keydown", closeOnEscape));
             <div class="member-list">
               <div v-for="member in members" :key="member.uid" class="member-row">
                 <span>
-                  <strong>{{ member.displayName || member.username }}</strong>
+                  <strong>{{ memberName(member) }}</strong>
                   <small>
-                    {{ member.accountType === "agent" ? t("badge.agent") : `@${member.username}` }}
+                    {{ member.accountType === "agent" ? t("badge.agent")
+                      : isRealName(member.username) ? `@${member.username}` : t("badge.person") }}
                     <template v-if="member.uid === group.creatorUid">· {{ t("group.owner") }}</template>
                   </small>
                 </span>
@@ -294,7 +303,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", closeOnEscape));
             <div v-for="agent in agents" :key="agent.uid" class="allowlist">
               <div class="allowlist-heading">
                 <strong>{{
-                  t("group.allowlistTitle", { agent: agent.displayName || agent.username })
+                  t("group.allowlistTitle", { agent: memberName(agent) })
                 }}</strong>
               </div>
               <label v-if="allowlists[agent.uid]?.ownerImplicit" class="check-row owner-row">
@@ -307,7 +316,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", closeOnEscape));
                   :checked="allowlistDrafts[agent.uid]?.includes(member.uid)"
                   @change="toggleAllowlist(agent.uid, member.uid)"
                 >
-                {{ member.displayName || member.username }}
+                {{ memberName(member) }}
               </label>
               <p v-if="!allowlistCandidates.length" class="picker-status">
                 {{ t("group.allowlistEmpty") }}

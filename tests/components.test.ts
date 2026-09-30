@@ -24,12 +24,13 @@ test("the collapsed card shows an initial derived from the resolved name", async
 // The expanded state below is the degraded card (account-ui failed to load):
 // avatar + name only, no actions. The loaded popover is the shell's module,
 // covered by nucleagent-web tests/accountPopover.test.ts.
-test("fallback: a missing profile name falls back to Portal user <uid>, never a blank", async () => {
+// UNI-IMUX2: nickName is mandatory; while it resolves the card shows a
+// skeleton, never the UID or a "Portal user <uid>" stand-in.
+test("fallback: a missing profile name renders a skeleton, never the UID", async () => {
   const html = await openCard({ uid: "10480118" });
   assert.match(html, /im-identity-fallback/);
-  assert.match(html, /Portal user 10480118/);
-  // The initial comes from that fallback rather than rendering empty.
-  assert.match(html, />P</);
+  assert.match(html, /name-skeleton/);
+  assert.doesNotMatch(html.replace(/<[^>]+>/g, " "), /10480118|Portal user/);
 });
 
 test("fallback: a resolved profile name wins over the placeholder", async () => {
@@ -40,7 +41,7 @@ test("fallback: a resolved profile name wins over the placeholder", async () => 
 
 test("fallback: a whitespace-only profile name is treated as absent", async () => {
   const html = await openCard({ uid: "10480118", displayName: "   " });
-  assert.match(html, /Portal user 10480118/);
+  assert.match(html, /name-skeleton/);
 });
 
 // UNI-ACCTUI: degraded means display only — no account, sign-out, or copy actions.

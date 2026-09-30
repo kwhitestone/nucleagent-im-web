@@ -221,7 +221,8 @@ export interface DirectoryPage {
   nextCursor?: string; // browse mode only
 }
 
-class NotFound extends Error {}
+/** 404 from an auth directory route: the directory is switched off for this env. */
+export class NotFound extends Error {}
 
 async function authGet<T>(path: string, session: ConnectSession): Promise<T> {
   const response = await fetch(`${authBase}${path}`, { headers: { Authorization: session.jwt } });
@@ -265,6 +266,44 @@ export async function browseDirectory(
     if (error instanceof NotFound) return null;
     throw error;
   }
+}
+
+export interface ResolvedProfile {
+  nickName: string;
+  avatar: string;
+  accountType: "human" | "agent";
+  provisioned: boolean;
+}
+
+export interface ResolvedUser {
+  uid: number;
+  /** null only when no account has this uid; never an error. */
+  profile: ResolvedProfile | null;
+}
+
+export interface ResolvePage {
+  items: ResolvedUser[];
+  degraded: boolean; // portal unreachable: stored names only
+}
+
+const resolveBatch = 200; // the server's per-call cap
+
+// Names IM uids for display (auth directory/resolve). Read-only on the server:
+// it never provisions anyone. Throws NotFound when the directory is off.
+export async function resolveUsers(uids: number[], session: ConnectSession): Promise<ResolvePage> {
+  const out: ResolvePage = { items: [], degraded: false };
+  for (let i = 0; i < uids.length; i += resolveBatch) {
+    const response = await fetch(`${authBase}/api/v1/addons/auth/directory/resolve`, {
+      method: "POST",
+      headers: { Authorization: session.jwt, "Content-Type": "application/json" },
+      body: JSON.stringify({ uids: uids.slice(i, i + resolveBatch) }),
+    });
+    if (response.status === 404) throw new NotFound();
+    const page = await readEnvelope<ResolvePage>(response);
+    out.items.push(...page.items);
+    out.degraded ||= page.degraded;
+  }
+  return out;
 }
 
 // Maps a portal-only user to their IM uid, creating the local account on first

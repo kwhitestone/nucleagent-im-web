@@ -693,8 +693,27 @@ textarea:focus {
   font-weight: 600;
 }
 
-.conversation-copy strong.mono {
-  font-family: var(--im-uid-font);
+.name-skeleton {
+  /* nickName still resolving: a neutral bar, never the UID (UNI-IMUX2). */
+  display: inline-block;
+  width: 7em;
+  max-width: 100%;
+  height: 0.9em;
+  border-radius: 4px;
+  vertical-align: middle;
+  background: linear-gradient(90deg, var(--bg-subtle), var(--bg-hover), var(--bg-subtle));
+  background-size: 200% 100%;
+  animation: name-shimmer 1.2s linear infinite;
+}
+
+.name-skeleton.wide {
+  width: 10em;
+  height: 1.1em;
+  margin: 0;
+}
+
+@keyframes name-shimmer {
+  to { background-position: -200% 0; }
 }
 
 .conversation-copy small {
