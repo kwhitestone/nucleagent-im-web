@@ -11,6 +11,7 @@ import {
   type DirectoryEntry,
 } from "../api";
 import { ensureNames, isRealName, nameFor } from "../names";
+import type { ProfileTarget } from "../accountPopover";
 
 const { t } = useI18n();
 
@@ -32,6 +33,8 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   select: [contact: Contact];
   "update:modelValue": [contacts: Contact[]];
+  /** ⓘ: show this person's profile card; its primary action picks them (board §04). */
+  profile: [anchor: HTMLElement, target: ProfileTarget];
 }>();
 
 const query = ref("");
@@ -187,6 +190,18 @@ async function choose(entry: DirectoryEntry): Promise<void> {
   if (!props.multiple) open.value = false; // group dialog: keep browsing to add more
 }
 
+function inspect(entry: DirectoryEntry, anchor: HTMLElement): void {
+  emit("profile", anchor, {
+    uid: entry.provisioned ? String(entry.id) : "",
+    portalUid: entry.provisioned ? undefined : entry.portalUid,
+    known: {
+      nickName: rowName(entry), username: entry.username,
+      accountType: entry.accountType, provisioned: entry.provisioned,
+    },
+    select: () => void choose(entry),
+  });
+}
+
 function remove(contact: Contact): void {
   emit("update:modelValue", props.modelValue.filter((item) => item.id !== contact.id));
 }
@@ -226,23 +241,27 @@ onBeforeUnmount(() => {
     </div>
     <!-- Browse mode: everyone, by name. Same rows and badges as search. -->
     <div v-if="browsing" class="contact-results" role="listbox" data-testid="im-directory-browse">
-      <button
-        v-for="contact in browseShown"
-        :key="entryKey(contact)"
-        class="contact-result"
-        type="button"
-        role="option"
-        @click="choose(contact)"
-      >
-        <span>
-          <strong>{{ rowName(contact) }}</strong>
-          <small v-if="contact.provisioned">{{ rowSub(contact) }}</small>
-          <small v-else>{{ t("badge.notJoined") }}</small>
-        </span>
-        <span class="account-badge" :class="contact.provisioned ? contact.accountType : 'portal'">
-          {{ contact.accountType === "agent" ? t("badge.agent") : t("badge.person") }}
-        </span>
-      </button>
+      <div v-for="contact in browseShown" :key="entryKey(contact)" class="contact-row">
+        <button class="contact-result" type="button" role="option" @click="choose(contact)">
+          <span>
+            <strong>{{ rowName(contact) }}</strong>
+            <small v-if="contact.provisioned">{{ rowSub(contact) }}</small>
+            <small v-else>{{ t("badge.notJoined") }}</small>
+          </span>
+          <span class="account-badge" :class="contact.provisioned ? contact.accountType : 'portal'">
+            {{ contact.accountType === "agent" ? t("badge.agent") : t("badge.person") }}
+          </span>
+        </button>
+        <button
+          class="contact-info"
+          type="button"
+          data-testid="im-picker-info"
+          :aria-label="t('profile.view', { name: rowName(contact) })"
+          @click="inspect(contact, $event.currentTarget as HTMLElement)"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
+        </button>
+      </div>
       <p v-if="error" class="picker-status error" role="alert">{{ error }}</p>
       <p v-if="browseLoading" class="picker-status">{{ t("chat.loading") }}</p>
       <p v-else-if="browseError" class="picker-status error" role="alert">{{ browseError }}</p>
@@ -255,25 +274,29 @@ onBeforeUnmount(() => {
     <p v-else-if="loading" class="picker-status">{{ t("search.searching") }}</p>
     <p v-else-if="error" class="picker-status error" role="alert">{{ error }}</p>
     <div v-else-if="results.length" class="contact-results" role="listbox">
-      <button
-        v-for="contact in results"
-        :key="entryKey(contact)"
-        class="contact-result"
-        type="button"
-        role="option"
-        @click="choose(contact)"
-      >
-        <span>
-          <strong>{{ rowName(contact) }}</strong>
-          <!-- UID stays as secondary text: the only way to tell duplicate names
-               apart, and it quietly teaches that a UID is shareable. -->
-          <small v-if="contact.provisioned">{{ rowSub(contact) }}</small>
-          <small v-else>{{ t("badge.notJoined") }}</small>
-        </span>
-        <span class="account-badge" :class="contact.provisioned ? contact.accountType : 'portal'">
-          {{ contact.accountType === "agent" ? t("badge.agent") : t("badge.person") }}
-        </span>
-      </button>
+      <div v-for="contact in results" :key="entryKey(contact)" class="contact-row">
+        <button class="contact-result" type="button" role="option" @click="choose(contact)">
+          <span>
+            <strong>{{ rowName(contact) }}</strong>
+            <!-- UID stays as secondary text: the only way to tell duplicate names
+                 apart, and it quietly teaches that a UID is shareable. -->
+            <small v-if="contact.provisioned">{{ rowSub(contact) }}</small>
+            <small v-else>{{ t("badge.notJoined") }}</small>
+          </span>
+          <span class="account-badge" :class="contact.provisioned ? contact.accountType : 'portal'">
+            {{ contact.accountType === "agent" ? t("badge.agent") : t("badge.person") }}
+          </span>
+        </button>
+        <button
+          class="contact-info"
+          type="button"
+          data-testid="im-picker-info"
+          :aria-label="t('profile.view', { name: rowName(contact) })"
+          @click="inspect(contact, $event.currentTarget as HTMLElement)"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
+        </button>
+      </div>
       <button v-if="hasMore" class="quiet contact-more" type="button" @click="more">{{ t("search.more") }}</button>
       <p v-if="degraded" class="picker-status">{{ t("search.degraded") }}</p>
     </div>

@@ -91,6 +91,7 @@ export default {
   profile: {
     // A uid with no account at all (never a nickName fallback, never the number).
     noAccount: "No such account",
+    view: "View {name}'s profile",
   },
   me: {
     myUid: "Your UID",

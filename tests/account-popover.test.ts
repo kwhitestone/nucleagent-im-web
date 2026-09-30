@@ -3,9 +3,12 @@ import test from "node:test";
 import {
   createAccountPopover,
   loadAccountPopover,
+  profileActions,
+  profileParams,
   type AccountPopoverMount,
   type AccountPopoverParams,
   type LoaderDeps,
+  type ProfileCardParams,
 } from "../src/accountPopover.ts";
 
 const URL_ = "https://shell.example/remote/account-ui.js";
@@ -91,4 +94,41 @@ test("no configured URL is degraded from the start and makes no request", async 
   assert.equal(popover.degraded.value, true);
   assert.equal(await popover.open({} as HTMLElement, params), false);
   assert.equal(calls.fetch.length, 0);
+});
+
+// ---- UNI-IMUX3: the other-person profile card from the same module ----
+
+test("profile card comes from the same module load as the popover (one import)", async () => {
+  const { deps, calls } = fakeDeps();
+  const cards: Array<[unknown, ProfileCardParams]> = [];
+  const card = { mount: (el: unknown, p: ProfileCardParams) => { cards.push([el, p]); }, unmount() {} };
+  deps.importModule = async (url) => { calls.import.push(url); return { default: { mount() {}, unmount() {} }, profileCard: card }; };
+  const ui = createAccountPopover(URL_, deps);
+  const anchor = { id: "sender" } as unknown as HTMLElement;
+  const session = { uid: "1", token: "t", wsAddr: "ws://x", jwt: "Bearer abc" };
+  assert.equal(await ui.openProfile(anchor, profileParams(session, "zh", { uid: "14", known: { nickName: "林雨" } })), true);
+  assert.equal(await ui.open(anchor, params), true);
+  assert.equal(calls.import.length, 1, "popover and card share one module load");
+  assert.equal(cards[0][0], anchor);
+  assert.equal(cards[0][1].uid, "14");
+  assert.equal(cards[0][1].auth.token, "Bearer abc", "resolve runs as this IM session");
+  assert.match(cards[0][1].auth.base, /^https?:\/\//, "against im-web's auth base");
+});
+
+test("a shell without profileCard (pre-IMUX3) keeps the popover and opens no card", async () => {
+  const { deps } = fakeDeps();
+  const ui = createAccountPopover(URL_, deps);
+  const session = { uid: "1", token: "t", wsAddr: "ws://x", jwt: "j" };
+  assert.equal(await ui.openProfile({} as HTMLElement, profileParams(session, "en", { uid: "14" })), false);
+  assert.equal(ui.degraded.value, false, "the popover itself still works");
+  assert.equal(await ui.open({} as HTMLElement, params), true);
+});
+
+test("context actions: picker → Select only; self or portal-only → none; inside that DM → no Message", () => {
+  const self = { selfUid: "1" };
+  assert.deepEqual(profileActions({ uid: "14", select: () => {} }, self), { select: true, message: false, addToGroup: false });
+  assert.deepEqual(profileActions({ uid: "14" }, self), { select: false, message: true, addToGroup: true });
+  assert.deepEqual(profileActions({ uid: "14" }, { selfUid: "1", dmUid: "14" }), { select: false, message: false, addToGroup: true });
+  assert.deepEqual(profileActions({ uid: "1" }, self), { select: false, message: false, addToGroup: false });
+  assert.deepEqual(profileActions({ uid: "" }, self), { select: false, message: false, addToGroup: false });
 });

@@ -1,0 +1,84 @@
+// UNI-IMUX3: the four entry points to the shared profile card (board §03):
+// chat header title, message sender, group member row, picker ⓘ. The card
+// itself is the shell's account-ui module (nucleagent-web
+// tests/accountPopover.test.ts); here we pin the wiring on this side.
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+import { loadComponent, render } from "./render.ts";
+
+const app = readFileSync("src/App.vue", "utf8");
+
+test("chat header: a direct chat's title is a button that opens the card", () => {
+  const header = app.slice(app.indexOf('<header class="chat-header">'), app.indexOf("</header>", app.indexOf('<header class="chat-header">')));
+  assert.match(header, /data-testid="im-header-profile"[\s\S]*@click="headerProfile"/);
+  assert.match(header, /v-if="activeTitle && activeChannel\?\.channelType === ChannelTypePerson"/, "groups keep a plain title");
+  assert.match(app, /function headerProfile[\s\S]*?openProfile\(event\.currentTarget as HTMLElement, \{\s*uid: channel\.channelID/);
+});
+
+test("message sender: another person's name is a button; own messages are not", () => {
+  const sender = app.slice(app.indexOf('<span class="sender">'), app.indexOf("</span>", app.indexOf("im-sender-profile")));
+  assert.match(sender, /v-if="isOwnMessage\(message\)"/);
+  assert.match(sender, /data-testid="im-sender-profile"[\s\S]*@click="senderProfile\(message, \$event\)"/);
+  assert.match(app, /function senderProfile[\s\S]*?if \(isOwnMessage\(message\)\) return;[\s\S]*?uid: message\.fromUID/);
+});
+
+test("picker and group dialog forward their profile events to the one opener", () => {
+  assert.match(app, /<ContactPicker[\s\S]*?@profile="openProfile"/);
+  assert.match(app, /<GroupDialog[\s\S]*?@profile="openProfile"/);
+  assert.match(app, /accountUi\.openProfile\(anchor, profileParams\(session\.value/);
+});
+
+const session = { uid: "1", token: "t", wsAddr: "ws://x", jwt: "j" };
+
+/** Renders an SFC and hands back its setup bindings, so a test can call a handler. */
+async function withBindings(path: string, props: Record<string, unknown>) {
+  const component = await loadComponent(path) as { setup: (p: unknown, c: { emit: (...a: unknown[]) => void }) => Record<string, unknown> };
+  const emitted: unknown[][] = [];
+  const original = component.setup;
+  let bindings: Record<string, unknown> = {};
+  component.setup = function (this: unknown, p: unknown, ctx: { emit: (...a: unknown[]) => void }) {
+    bindings = original.call(this, p, { ...ctx, emit: (...args: unknown[]) => emitted.push(args) });
+    return bindings;
+  };
+  try {
+    const html = await render(component, props, "en");
+    return { html, bindings, emitted };
+  } finally {
+    component.setup = original;
+  }
+}
+
+test("picker ⓘ: a separate 44px button per row whose card picks that person", async () => {
+  const src = readFileSync("src/components/ContactPicker.vue", "utf8");
+  assert.equal(src.match(/data-testid="im-picker-info"/g)?.length, 2, "browse and search rows alike");
+  assert.match(src, /:aria-label="t\('profile\.view', \{ name: rowName\(contact\) \}\)"/);
+  const css = readFileSync("src/style.css", "utf8");
+  assert.match(css, /\.contact-info \{[^}]*width: 44px;[^}]*height: 44px;/);
+
+  const { bindings, emitted } = await withBindings("src/components/ContactPicker.vue", { session });
+  const inspect = bindings.inspect as (entry: unknown, el: unknown) => void;
+  const anchor = { id: "i" };
+  inspect({ id: 14, username: "lin.yu", displayName: "林雨", accountType: "human", provisioned: true }, anchor);
+  inspect({ id: 0, portalUid: 88, username: "portal_3f9a", displayName: "陈雨桐", accountType: "human", provisioned: false }, anchor);
+  const [first, second] = emitted.filter((e) => e[0] === "profile") as Array<[string, unknown, { uid: string; portalUid?: number; known: Record<string, unknown>; select: unknown }]>;
+  assert.equal(first[1], anchor);
+  assert.equal(first[2].uid, "14");
+  assert.equal(first[2].known.username, "lin.yu");
+  assert.equal(typeof first[2].select, "function", "the card's primary is Select");
+  assert.deepEqual([second[2].uid, second[2].portalUid, second[2].known.provisioned], ["", 88, false], "portal-only: by portalUid, never uid 0");
+});
+
+// GroupDialog imports ContactPicker.vue, which the SFC harness cannot nest, so
+// its wiring is pinned from source (the picker above is exercised live).
+const dialog = readFileSync("src/components/GroupDialog.vue", "utf8");
+
+test("group member: the name is a button that opens that member's card", () => {
+  assert.match(dialog, /data-testid="im-member-profile"[\s\S]*@click="inspect\(member, \$event\.currentTarget as HTMLElement\)"/);
+  assert.match(dialog, /function inspect\(member: GroupMember, anchor: HTMLElement\)[\s\S]*?emit\("profile", anchor, \{\s*uid: String\(member\.uid\),[\s\S]*?avatar: member\.avatar,[\s\S]*?accountType: member\.accountType/);
+});
+
+test("group dialog preselects people passed by the card's Add to group", () => {
+  assert.match(dialog, /const selected = ref<Contact\[\]>\(\[\.\.\.\(props\.preselect \?\? \[\]\)\]\);/);
+  assert.match(app, /onAddToGroup: !can\.addToGroup \? undefined : \(\) => \{[\s\S]*?showCreateGroup\(\[contact\(\)\]\)/);
+});

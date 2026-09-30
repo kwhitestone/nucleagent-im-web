@@ -91,6 +91,7 @@ export default {
   profile: {
     // A uid with no account at all (never a nickName fallback, never the number).
     noAccount: "无此账号",
+    view: "查看 {name} 的资料",
   },
   me: {
     myUid: "我的 UID",

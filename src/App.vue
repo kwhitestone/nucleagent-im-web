@@ -56,6 +56,8 @@ import { accountTypeOf, ensureNames, isMissing, nameFor, resetNames } from "./na
 import ContactPicker from "./components/ContactPicker.vue";
 import GroupDialog from "./components/GroupDialog.vue";
 import IdentityCard from "./components/IdentityCard.vue";
+import { profileActions, profileParams, useAccountPopover, type ProfileTarget } from "./accountPopover";
+import { getLocale } from "./i18n";
 import EmptyPaths from "./components/EmptyPaths.vue";
 import SystemLine from "./components/SystemLine.vue";
 import { configureSDK } from "./im";
@@ -116,6 +118,7 @@ const historyFinished = ref(false);
 const chatElement = ref<HTMLElement>();
 const groupDialogOpen = ref(false);
 const dialogGroup = ref<IMGroup>();
+const groupPreselect = ref<Contact[]>([]);
 let viewGeneration = 0;
 let listenersInstalled = false;
 let streamAbort: AbortController | undefined;
@@ -827,9 +830,59 @@ async function sendMessage(): Promise<void> {
   }
 }
 
-function showCreateGroup(): void {
+function showCreateGroup(preselect: Contact[] = []): void {
   dialogGroup.value = undefined;
+  groupPreselect.value = preselect;
   groupDialogOpen.value = true;
+}
+
+// Someone else's profile card (UNI-IMUX3): the shell's account-ui module, the
+// same one the rail "Me" slot opens. Four entry points call this: chat header,
+// message sender, group member, picker ⓘ. Actions follow the context (board
+// §03): no "Message" inside that very DM; the picker's primary is "Select".
+const accountUi = useAccountPopover();
+function openProfile(anchor: HTMLElement, target: ProfileTarget): void {
+  if (!session.value || !(target.uid || target.portalUid)) return;
+  const uid = target.uid;
+  const channel = activeChannel.value;
+  const can = profileActions(target, {
+    selfUid: session.value.uid,
+    dmUid: channel?.channelType === ChannelTypePerson ? channel.channelID : undefined,
+  });
+  const contact = (): Contact => ({
+    id: Number(uid), username: target.known?.username ?? "",
+    displayName: personName(uid) || target.known?.nickName || "", accountType: target.known?.accountType ?? "human",
+  });
+  void accountUi.openProfile(anchor, profileParams(session.value, getLocale(), {
+    uid, portalUid: target.portalUid, known: target.known,
+    onSelect: can.select ? target.select : undefined,
+    onMessage: can.message ? () => openContact(contact()) : undefined,
+    onAddToGroup: !can.addToGroup ? undefined : () => {
+      groupDialogOpen.value = false;
+      void nextTick(() => showCreateGroup([contact()]));
+    },
+  }));
+}
+
+function senderProfile(message: Message, event: MouseEvent): void {
+  if (isOwnMessage(message)) return;
+  const member = activeGroupMembers.value.find((item) => String(item.uid) === message.fromUID);
+  openProfile(event.currentTarget as HTMLElement, {
+    uid: message.fromUID,
+    known: { nickName: personName(message.fromUID), username: member?.username, avatar: member?.avatar,
+      accountType: isAgentMessage(message) ? "agent" : member?.accountType },
+  });
+}
+
+function headerProfile(event: MouseEvent): void {
+  const channel = activeChannel.value;
+  if (channel?.channelType !== ChannelTypePerson) return;
+  const contact = knownContacts.value.find((item) => String(item.id) === channel.channelID);
+  openProfile(event.currentTarget as HTMLElement, {
+    uid: channel.channelID,
+    known: { nickName: personName(channel.channelID), username: contact?.username,
+      accountType: isAgentUid(channel.channelID) ? "agent" : contact?.accountType },
+  });
 }
 
 function showGroupDetails(): void {
@@ -1063,7 +1116,7 @@ onBeforeUnmount(() => {
           type="button"
           :title="t('group.create')"
           :aria-label="t('group.create')"
-          @click="showCreateGroup"
+          @click="showCreateGroup()"
         >
           +
         </button>
@@ -1085,6 +1138,7 @@ onBeforeUnmount(() => {
           :session="session"
           :placeholder="t('list.searchPlaceholder')"
           @select="openContact"
+          @profile="openProfile"
         />
         <form v-if="dialOpen" class="uid-dial" @submit.prevent="dialUidOpen">
           <input
@@ -1179,7 +1233,17 @@ onBeforeUnmount(() => {
           ‹
         </button>
         <div>
-          <h2 v-if="activeTitle">{{ activeTitle }}</h2>
+          <!-- A direct chat's title is the profile trigger (board §03 anno 1). -->
+          <h2 v-if="activeTitle && activeChannel?.channelType === ChannelTypePerson">
+            <button
+              class="title-trigger"
+              type="button"
+              data-testid="im-header-profile"
+              :aria-label="t('profile.view', { name: activeTitle })"
+              @click="headerProfile"
+            >{{ activeTitle }}</button>
+          </h2>
+          <h2 v-else-if="activeTitle">{{ activeTitle }}</h2>
           <h2 v-else class="name-skeleton wide" :aria-label="t('chat.loading')" />
           <span v-if="activeChannel">
             {{ activeChannel.channelType === ChannelTypeGroup
@@ -1203,7 +1267,7 @@ onBeforeUnmount(() => {
         v-if="!activeChannel && isFirstRun"
         @search="focusSearch"
         @dial="openDial"
-        @group="showCreateGroup"
+        @group="showCreateGroup()"
       />
 
       <div v-else-if="!activeChannel" class="empty-chat">
@@ -1238,7 +1302,14 @@ onBeforeUnmount(() => {
           >
             <span class="sender">
               <template v-if="isOwnMessage(message)">{{ t("chat.you") }}</template>
-              <template v-else-if="personName(message.fromUID)">{{ personName(message.fromUID) }}</template>
+              <button
+                v-else-if="personName(message.fromUID)"
+                class="sender-trigger"
+                type="button"
+                data-testid="im-sender-profile"
+                :aria-label="t('profile.view', { name: personName(message.fromUID) })"
+                @click="senderProfile(message, $event)"
+              >{{ personName(message.fromUID) }}</button>
               <span v-else class="name-skeleton" :aria-label="t('chat.loading')" />
               <span v-if="isAgentMessage(message)" class="tag agent">{{ t("badge.agent") }}</span>
               <span v-if="relayLabel(message)" class="tag relay">{{ relayLabel(message) }}</span>
@@ -1334,7 +1405,9 @@ onBeforeUnmount(() => {
       v-if="groupDialogOpen"
       :session="session"
       :group="dialogGroup"
+      :preselect="groupPreselect"
       @close="groupDialogOpen = false"
+      @profile="openProfile"
       @created="groupCreated"
       @changed="groupChanged"
       @removed="groupRemoved"

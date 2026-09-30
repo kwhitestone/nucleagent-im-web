@@ -17,10 +17,13 @@ import {
 import { useI18n } from "vue-i18n";
 import ContactPicker from "./ContactPicker.vue";
 import { ensureNames, isRealName, nameFor } from "../names";
+import type { ProfileTarget } from "../accountPopover";
 
 const props = defineProps<{
   session: ConnectSession;
   group?: IMGroup;
+  /** Create mode: people already picked (the profile card's "Add to group"). */
+  preselect?: Contact[];
 }>();
 
 const emit = defineEmits<{
@@ -28,12 +31,14 @@ const emit = defineEmits<{
   created: [group: IMGroup];
   changed: [];
   removed: [group: IMGroup];
+  /** A member row was clicked: show their profile card. */
+  profile: [anchor: HTMLElement, target: ProfileTarget];
 }>();
 
 const { t } = useI18n();
 
 const title = ref("");
-const selected = ref<Contact[]>([]);
+const selected = ref<Contact[]>([...(props.preselect ?? [])]);
 const members = ref<GroupMember[]>([]);
 const allowlists = ref<Record<number, AgentAllowlist>>({});
 const allowlistDrafts = ref<Record<number, number[]>>({});
@@ -193,6 +198,16 @@ function memberName(member: GroupMember): string {
     || member.displayName || member.username;
 }
 
+function inspect(member: GroupMember, anchor: HTMLElement): void {
+  emit("profile", anchor, {
+    uid: String(member.uid),
+    known: {
+      nickName: memberName(member), username: member.username, avatar: member.avatar,
+      accountType: member.accountType, provisioned: true,
+    },
+  });
+}
+
 function closeOnEscape(event: KeyboardEvent): void {
   if (event.key === "Escape") emit("close");
 }
@@ -257,7 +272,15 @@ onBeforeUnmount(() => window.removeEventListener("keydown", closeOnEscape));
             <div class="member-list">
               <div v-for="member in members" :key="member.uid" class="member-row">
                 <span>
-                  <strong>{{ memberName(member) }}</strong>
+                  <button
+                    class="member-name"
+                    type="button"
+                    data-testid="im-member-profile"
+                    :aria-label="t('profile.view', { name: memberName(member) })"
+                    @click="inspect(member, $event.currentTarget as HTMLElement)"
+                  >
+                    {{ memberName(member) }}
+                  </button>
                   <small>
                     {{ member.accountType === "agent" ? t("badge.agent")
                       : isRealName(member.username) ? `@${member.username}` : t("badge.person") }}
