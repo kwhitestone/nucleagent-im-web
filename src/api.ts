@@ -279,6 +279,8 @@ export interface ResolvedProfile {
   username?: string | null;
   /** UNI-IMUX4: portal-linked (enterprise) account; null = unknown. */
   enterprise?: boolean | null;
+  /** UNI-PROFILE1: Agentia Open ID (portal users.open_id); null = none recorded; absent = older auth. */
+  openId?: string | null;
 }
 
 export interface ResolvedUser {

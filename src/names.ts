@@ -49,6 +49,11 @@ export function isEnterprise(uid: string): boolean | undefined {
   return known.get(uid)?.enterprise ?? undefined;
 }
 
+/** Agentia Open ID per resolve: string, null = none recorded, undefined = not known (older auth, not resolved yet). */
+export function openIdOf(uid: string): string | null | undefined {
+  return known.get(uid)?.openId;
+}
+
 /** Sign-out / account switch: one account's names never render in another's session. */
 export function resetNames(): void {
   known.clear();

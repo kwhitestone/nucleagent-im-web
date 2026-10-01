@@ -12,6 +12,8 @@ export interface AccountPopoverParams {
     nickName: string; headerImg: string; uid: number | string; roles?: string[];
     /** UNI-IMUX4 popover rows (board §05): @username and account kind. */
     username?: string; accountType?: "human" | "agent"; enterprise?: boolean;
+    /** UNI-PROFILE1 unified card: Agentia Open ID; null = none recorded; omitted = unknown. */
+    openId?: string | null;
   };
   logout: () => Promise<void> | void;
   manageAccount: () => void;

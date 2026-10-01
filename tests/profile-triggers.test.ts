@@ -95,14 +95,19 @@ test("rail Me: the popover gets @username, account kind and enterprise from the 
   const { ensureNames, resetNames } = await import("../src/names.ts");
   const original = globalThis.fetch;
   globalThis.fetch = async () => new Response(JSON.stringify({ code: 0, data: { degraded: false, items: [
-    { uid: 1, profile: { nickName: "赖碧威", avatar: "", accountType: "human", provisioned: true, username: null, enterprise: true } },
+    { uid: 1, profile: { nickName: "赖碧威", avatar: "", accountType: "human", provisioned: true, username: null, enterprise: true, openId: "nduc_nd_1" } },
+    { uid: 5, profile: { nickName: "Ops", avatar: "", accountType: "human", provisioned: true, username: "ops", enterprise: false, openId: null } },
+    { uid: 6, profile: { nickName: "Old auth", avatar: "", accountType: "human", provisioned: true } },
   ] } }), { status: 200 });
   try {
-    await ensureNames(["1"], session);
+    await ensureNames(["1", "5", "6"], session);
   } finally { globalThis.fetch = original; }
   const card = readFileSync("src/components/IdentityCard.vue", "utf8");
   assert.match(card, /username: handleFor\(props\.uid\) \|\| undefined, accountType: accountTypeOf\(props\.uid\), enterprise: isEnterprise\(props\.uid\)/);
-  const { handleFor, isEnterprise, accountTypeOf } = await import("../src/names.ts");
+  assert.match(card, /openId: openIdOf\(props\.uid\)/, "UNI-PROFILE1: the unified card's Agentia Open ID row");
+  const { handleFor, isEnterprise, accountTypeOf, openIdOf } = await import("../src/names.ts");
   assert.deepEqual([handleFor("1"), accountTypeOf("1"), isEnterprise("1")], ["", "human", true], "portal self: no handle, Enterprise");
+  assert.deepEqual([openIdOf("1"), openIdOf("5"), openIdOf("6"), openIdOf("7")], ["nduc_nd_1", null, undefined, undefined],
+    "linked / none recorded / older auth / not resolved");
   resetNames();
 });
