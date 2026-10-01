@@ -54,6 +54,11 @@ export function openIdOf(uid: string): string | null | undefined {
   return known.get(uid)?.openId;
 }
 
+/** UNI-PHONESEARCH: masked phone per resolve; null = none to show, undefined = not known. */
+export function phoneMaskedOf(uid: string): string | null | undefined {
+  return known.get(uid)?.phoneMasked;
+}
+
 /** Sign-out / account switch: one account's names never render in another's session. */
 export function resetNames(): void {
   known.clear();

@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import {
   browseDirectory,
   minContactQueryLength,
+  phoneDigits,
   provisionContact,
   searchDirectory,
   type ConnectSession,
@@ -162,12 +163,23 @@ function rowName(contact: Contact): string {
 
 // Board §04: the least needed to tell same-named people apart — the real
 // @username (resolved; never portal_<uuid>), else "Enterprise"; then the UID.
-function rowSub(contact: Contact): string {
+function rowSub(contact: DirectoryEntry): string {
   const uid = String(contact.id);
   const handle = handleFor(uid, contact.username);
   const lead = handle ? `@${handle}` : isEnterprise(uid) ? t("badge.enterprise") : "";
-  return [lead, `${t("badge.uid")} ${uid}`].filter(Boolean).join(" · ");
+  return [lead, `${t("badge.uid")} ${uid}`, contact.phoneMasked].filter(Boolean).join(" · ");
 }
+
+/** Portal-only rows: enterprise, the masked phone when there is one, then not joined. */
+function portalSub(contact: DirectoryEntry): string {
+  return [t("badge.enterprise"), contact.phoneMasked, t("badge.notJoined")].filter(Boolean).join(" · ");
+}
+
+// Digits typed (a phone number): ask phones for the phone keypad.
+// ponytail: iOS applies a changed inputmode only on the next focus; a
+// separate phone field would fix that if users ask.
+const inputMode = computed(() => (/^\s*\+?\d/.test(query.value) ? "tel" : "search"));
+const phoneSearch = computed(() => !!phoneDigits(query.value));
 
 function entryKey(entry: DirectoryEntry): string {
   return `${entry.id}:${entry.portalUid ?? 0}`;
@@ -222,6 +234,7 @@ onBeforeUnmount(() => {
       v-model="query"
       class="contact-search"
       type="search"
+      :inputmode="inputMode"
       :aria-label="label || placeholder || t('search.placeholder')"
       :placeholder="placeholder || t('search.placeholder')"
       :aria-expanded="browsing"
@@ -249,7 +262,7 @@ onBeforeUnmount(() => {
           <span>
             <strong>{{ rowName(contact) }}</strong>
             <small v-if="contact.provisioned">{{ rowSub(contact) }}</small>
-            <small v-else>{{ t("badge.enterprise") }} · {{ t("badge.notJoined") }}</small>
+            <small v-else>{{ portalSub(contact) }}</small>
           </span>
           <span class="account-badge" :class="contact.provisioned ? contact.accountType : 'portal'">
             {{ contact.accountType === "agent" ? t("badge.agent") : t("badge.person") }}
@@ -284,7 +297,7 @@ onBeforeUnmount(() => {
             <!-- UID stays as secondary text: the only way to tell duplicate names
                  apart, and it quietly teaches that a UID is shareable. -->
             <small v-if="contact.provisioned">{{ rowSub(contact) }}</small>
-            <small v-else>{{ t("badge.enterprise") }} · {{ t("badge.notJoined") }}</small>
+            <small v-else>{{ portalSub(contact) }}</small>
           </span>
           <span class="account-badge" :class="contact.provisioned ? contact.accountType : 'portal'">
             {{ contact.accountType === "agent" ? t("badge.agent") : t("badge.person") }}
@@ -309,7 +322,7 @@ onBeforeUnmount(() => {
          and otherwise reads as "this person does not exist". -->
     <div v-else-if="query.trim().length >= minContactQueryLength" class="picker-empty">
       <p>{{ t("search.noResults", { query: query.trim() }) }}</p>
-      <small>{{ t("search.prefixHint") }}</small>
+      <small>{{ t(phoneSearch ? "search.phoneHint" : "search.prefixHint") }}</small>
     </div>
   </div>
 </template>

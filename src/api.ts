@@ -213,6 +213,18 @@ export interface DirectoryEntry extends Contact {
   provisioned: boolean;
   /** B2 (UNI-IMUX4): https avatar, "" when none. Absent on an older auth. */
   avatar?: string;
+  /** UNI-PHONESEARCH: masked phone (138****1234); null = none to show. Never the full number. */
+  phoneMasked?: string | null;
+}
+
+/**
+ * The digits of phone-like input (spaces, dashes and a +86 prefix ignored),
+ * or "" when the input is not one: anything else in it, or under the 4 digits
+ * auth requires. Mirrors auth's phonedisplay.Normalize.
+ */
+export function phoneDigits(query: string): string {
+  const d = query.trim().replace(/[\s-]/g, "").replace(/^\+86/, "");
+  return /^\d{4,20}$/.test(d) ? d : "";
 }
 
 export interface DirectoryPage {
@@ -235,6 +247,8 @@ async function authGet<T>(path: string, session: ConnectSession): Promise<T> {
 // Directory search (auth userdirectory). When the directory is switched off
 // for this env (404), falls back to plain contacts search so the picker keeps
 // working with provisioned users only.
+// UNI-PHONESEARCH: phone-like input is also sent as `phone`, matched anywhere
+// in a portal phone number; a person matching the name or the phone is a hit.
 export async function searchDirectory(
   query: string,
   session: ConnectSession,
@@ -242,9 +256,11 @@ export async function searchDirectory(
 ): Promise<DirectoryPage> {
   const q = query.trim();
   if (q.length < minContactQueryLength) return { items: [], page, hasMore: false, degraded: false };
+  const params = new URLSearchParams({ q, page: String(page) });
+  const phone = phoneDigits(q);
+  if (phone) params.set("phone", phone);
   try {
-    return await authGet<DirectoryPage>(
-      `/api/v1/addons/auth/directory/search?${new URLSearchParams({ q, page: String(page) })}`, session);
+    return await authGet<DirectoryPage>(`/api/v1/addons/auth/directory/search?${params}`, session);
   } catch (error) {
     if (!(error instanceof NotFound)) throw error;
   }
@@ -281,6 +297,8 @@ export interface ResolvedProfile {
   enterprise?: boolean | null;
   /** UNI-PROFILE1: Agentia Open ID (portal users.open_id); null = none recorded; absent = older auth. */
   openId?: string | null;
+  /** UNI-PHONESEARCH: masked phone (138****1234); null = none to show; absent = older auth. */
+  phoneMasked?: string | null;
 }
 
 export interface ResolvedUser {

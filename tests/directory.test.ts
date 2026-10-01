@@ -160,3 +160,55 @@ test("picker sub-line reads the resolved @username, else 企业账号, then the 
     assert.doesNotMatch(html, /portal_66/);
   } finally { f.restore(); resetNames(); }
 });
+
+// --- UNI-PHONESEARCH ------------------------------------------------------------
+
+import { phoneDigits } from "../src/api.ts";
+
+test("phone-like input is sent as phone digits as well as q (spaces, dashes, +86 stripped)", async () => {
+  assert.equal(phoneDigits("138 1234-5678"), "13812345678");
+  assert.equal(phoneDigits("+86 5678"), "5678");
+  for (const notPhone of ["138", "ann", "13a8", "138****5678", ""]) assert.equal(phoneDigits(notPhone), "", notPhone);
+  const page = { items: [], page: 1, hasMore: false, degraded: false };
+  const f = stubFetch([[200, { code: 0, message: "success", data: page }], [200, { code: 0, message: "success", data: page }]]);
+  try {
+    await searchDirectory("+86 138-1234", session);
+    await searchDirectory("an", session);
+  } finally { f.restore(); }
+  const first = new URL(f.calls[0].url).searchParams;
+  assert.equal(first.get("phone"), "1381234");
+  assert.equal(first.get("q"), "+86 138-1234", "q still goes: a name may be digits too");
+  assert.equal(new URL(f.calls[1].url).searchParams.get("phone"), null, "names do not send phone");
+});
+
+test("search by a phone fragment renders hits with the masked phone; no raw number in the DOM", async () => {
+  const hits: DirectoryEntry[] = [
+    { ...person(0, false), portalUid: 21, displayName: "陈雨桐", phoneMasked: "138****5678" },
+    { ...person(7, true), displayName: "林雨", phoneMasked: "139****4321" },
+    { ...person(0, false), portalUid: 22, displayName: "无号码", phoneMasked: null },
+  ];
+  const html = await renderPicker({ query: "5678", results: hits });
+  assert.match(html, /陈雨桐[\s\S]*企业账号 · 138\*\*\*\*5678 · 尚未加入/);
+  assert.match(html, /林雨[\s\S]*UID 7 · 139\*\*\*\*4321/);
+  assert.match(html, /无号码[\s\S]*<small>企业账号 · 尚未加入/, "no phone: nothing in between");
+  assert.doesNotMatch(html, /\d{11}/, "never a full number");
+  assert.match(html, /inputmode="tel"/, "digits typed: phone keypad");
+  const name = await renderPicker({ query: "an" });
+  assert.match(name, /inputmode="search"/);
+  const none = await renderPicker({ query: "5678", results: [] });
+  assert.match(none, /部分号码在来源处已隐藏中间位/, "a phone search that misses explains the masked-at-source gap");
+});
+
+test("the rail's self card gets the masked phone from resolve", async () => {
+  const { ensureNames, phoneMaskedOf, resetNames } = await import("../src/names.ts");
+  const f = stubFetch([[200, { code: 0, message: "success", data: { degraded: false, items: [
+    { uid: 1, profile: { nickName: "Me", avatar: "", accountType: "human", provisioned: true, phoneMasked: "138****5678" } },
+    { uid: 2, profile: { nickName: "Ops", avatar: "", accountType: "human", provisioned: true, phoneMasked: null } },
+  ] } }]]);
+  try {
+    await ensureNames(["1", "2"], session);
+    assert.deepEqual([phoneMaskedOf("1"), phoneMaskedOf("2"), phoneMaskedOf("3")], ["138****5678", null, undefined]);
+  } finally { f.restore(); resetNames(); }
+  const { readFileSync } = await import("node:fs");
+  assert.match(readFileSync("src/components/IdentityCard.vue", "utf8"), /phoneMasked: phoneMaskedOf\(props\.uid\)/);
+});

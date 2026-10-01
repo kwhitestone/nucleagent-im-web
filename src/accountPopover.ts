@@ -14,6 +14,8 @@ export interface AccountPopoverParams {
     username?: string; accountType?: "human" | "agent"; enterprise?: boolean;
     /** UNI-PROFILE1 unified card: Agentia Open ID; null = none recorded; omitted = unknown. */
     openId?: string | null;
+    /** UNI-PHONESEARCH: masked phone (138****1234); null = none; omitted = unknown. */
+    phoneMasked?: string | null;
   };
   logout: () => Promise<void> | void;
   manageAccount: () => void;

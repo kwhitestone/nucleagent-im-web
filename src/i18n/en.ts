@@ -52,9 +52,10 @@ export default {
     searching: "Searching…",
     noResults: 'Nothing matches "{query}".',
     prefixHint:
-      "Search matches the start of a username or nickname. If you have their UID, add by UID instead.",
+      "Search matches the start of a username or nickname, or any 4+ digits of a phone number. If you have their UID, add by UID instead.",
+    phoneHint: "No phone number contains those digits. Some numbers are stored partly hidden and can only be found by their visible digits.",
     errFailed: "Contact search failed",
-    placeholder: "Search people and agents",
+    placeholder: "Search people, agents or phone",
     more: "Show more",
     degraded: "Directory unavailable — showing existing contacts only.",
     loadMore: "Load more",
