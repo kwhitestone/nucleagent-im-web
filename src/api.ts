@@ -238,17 +238,25 @@ export interface DirectoryPage {
 /** 404 from an auth directory route: the directory is switched off for this env. */
 export class NotFound extends Error {}
 
-async function authGet<T>(path: string, session: ConnectSession): Promise<T> {
-  const response = await fetch(`${authBase}${path}`, { headers: { Authorization: session.jwt } });
+async function authGet<T>(path: string, session: ConnectSession, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(`${authBase}${path}`, {
+    ...init,
+    headers: { Authorization: session.jwt, ...(init.body ? { "Content-Type": "application/json" } : {}) },
+  });
   if (response.status === 404) throw new NotFound();
   return readEnvelope<T>(response);
 }
+
+/** A number being typed, or text holding a 4+ digit run: never put in a URL. */
+const numberLike = (q: string) => /^\+?[\d\s-]+$/.test(q) || /\d{4}/.test(q);
 
 // Directory search (auth userdirectory). When the directory is switched off
 // for this env (404), falls back to plain contacts search so the picker keeps
 // working with provisioned users only.
 // UNI-PHONESEARCH: phone-like input is also sent as `phone`, matched anywhere
 // in a portal phone number; a person matching the name or the phone is a hit.
+// UNI-PHONESEARCH-2: number-like input travels only in a POST body, so no URL
+// (and no access log) ever carries its digits. Names stay on GET.
 export async function searchDirectory(
   query: string,
   session: ConnectSession,
@@ -256,15 +264,20 @@ export async function searchDirectory(
 ): Promise<DirectoryPage> {
   const q = query.trim();
   if (q.length < minContactQueryLength) return { items: [], page, hasMore: false, degraded: false };
-  const params = new URLSearchParams({ q, page: String(page) });
-  const phone = phoneDigits(q);
-  if (phone) params.set("phone", phone);
+  const path = "/api/v1/addons/auth/directory/search";
+  const number = numberLike(q);
   try {
-    return await authGet<DirectoryPage>(`/api/v1/addons/auth/directory/search?${params}`, session);
+    if (!number) return await authGet<DirectoryPage>(`${path}?${new URLSearchParams({ q, page: String(page) })}`, session);
+    const phone = phoneDigits(q);
+    return await authGet<DirectoryPage>(path, session, {
+      method: "POST",
+      body: JSON.stringify(phone ? { q, phone, page } : { q, page }),
+    });
   } catch (error) {
     if (!(error instanceof NotFound)) throw error;
   }
-  const contacts = await searchContacts(q, session);
+  // The contacts fallback is GET-only: a number is not sent there.
+  const contacts = number ? [] : await searchContacts(q, session);
   return { items: contacts.map((c) => ({ ...c, provisioned: true })), page: 1, hasMore: false, degraded: true };
 }
 

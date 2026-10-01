@@ -170,15 +170,36 @@ test("phone-like input is sent as phone digits as well as q (spaces, dashes, +86
   assert.equal(phoneDigits("+86 5678"), "5678");
   for (const notPhone of ["138", "ann", "13a8", "138****5678", ""]) assert.equal(phoneDigits(notPhone), "", notPhone);
   const page = { items: [], page: 1, hasMore: false, degraded: false };
-  const f = stubFetch([[200, { code: 0, message: "success", data: page }], [200, { code: 0, message: "success", data: page }]]);
+  const ok: [number, unknown] = [200, { code: 0, message: "success", data: page }];
+  const f = stubFetch([ok, ok, ok, ok]);
   try {
-    await searchDirectory("+86 138-1234", session);
+    await searchDirectory("+86 138-1234", session, 2);
     await searchDirectory("an", session);
+    await searchDirectory("13", session); // a number too short to be a phone: still not in a URL
+    await searchDirectory("ann 5678", session); // a digit run inside text
   } finally { f.restore(); }
-  const first = new URL(f.calls[0].url).searchParams;
-  assert.equal(first.get("phone"), "1381234");
-  assert.equal(first.get("q"), "+86 138-1234", "q still goes: a name may be digits too");
-  assert.equal(new URL(f.calls[1].url).searchParams.get("phone"), null, "names do not send phone");
+  // UNI-PHONESEARCH-2: the phone travels in a POST body, never in the URL.
+  assert.equal(f.calls[0].init.method, "POST");
+  assert.match(f.calls[0].url, /\/api\/v1\/addons\/auth\/directory\/search$/);
+  assert.equal((f.calls[0].init.headers as Record<string, string>)["Content-Type"], "application/json");
+  assert.deepEqual(JSON.parse(String(f.calls[0].init.body)), { q: "+86 138-1234", phone: "1381234", page: 2 }, "q still goes: a name may be digits too");
+  assert.equal(f.calls[1].init.method, undefined, "names stay on GET");
+  assert.match(f.calls[1].url, /\?q=an&page=1$/);
+  assert.deepEqual(JSON.parse(String(f.calls[2].init.body)), { q: "13", page: 1 }, "no phone under 4 digits");
+  assert.deepEqual(JSON.parse(String(f.calls[3].init.body)), { q: "ann 5678", page: 1 });
+  for (const c of f.calls) {
+    const u = new URL(c.url);
+    const where = decodeURIComponent(u.pathname + u.search);
+    for (const typed of ["138", "1234", "13", "5678"]) assert.ok(!where.includes(typed), `"${typed}" in ${c.url}`);
+  }
+});
+
+test("directory off (404) on a phone search: no GET fallback that would put the number in a URL", async () => {
+  const f = stubFetch([[404, { code: 404, message: "directory is disabled" }]]);
+  let page;
+  try { page = await searchDirectory("138 1234", session); } finally { f.restore(); }
+  assert.equal(f.calls.length, 1, "contacts/search (GET) is not called with a number");
+  assert.deepEqual(page, { items: [], page: 1, hasMore: false, degraded: true });
 });
 
 test("search by a phone fragment renders hits with the masked phone; no raw number in the DOM", async () => {
