@@ -16,6 +16,8 @@ const props = defineProps<{
   displayName?: string;
   /** auth user-info headerImg; the popover shows only absolute http(s) URLs. */
   avatar?: string;
+  /** user-info roles: the same Roles row the shell's self card shows (UNI-CARDCONT). */
+  roles?: string[];
 }>();
 
 const emit = defineEmits<{ account: []; logout: [] }>();
@@ -36,7 +38,7 @@ async function onClick(): Promise<void> {
   }
   const shown = chip.value && await popover.open(chip.value, {
     user: {
-      nickName: props.displayName?.trim() ?? "", headerImg: props.avatar ?? "", uid: props.uid,
+      nickName: props.displayName?.trim() ?? "", headerImg: props.avatar ?? "", uid: props.uid, roles: props.roles,
       // Self is in the resolve batch, so the unified card's rows (UNI-PROFILE1) need no extra call.
       username: handleFor(props.uid) || undefined, accountType: accountTypeOf(props.uid), enterprise: isEnterprise(props.uid),
       openId: openIdOf(props.uid),

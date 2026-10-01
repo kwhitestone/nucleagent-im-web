@@ -24,7 +24,13 @@ import { authBase, type ConnectSession } from "./api.ts";
 export interface UserProfile {
   displayName: string;
   avatar: string;
+  /** user-info roles, so the rail's card shows the same Roles row as the shell's (UNI-CARDCONT). */
+  roles?: string[];
 }
+
+/** `{roles}` when user-info (or the cache) carries a list, else nothing: callers spread it. */
+const roleList = (v: unknown): { roles?: string[] } =>
+  Array.isArray(v) ? { roles: v.filter((r): r is string => typeof r === "string" && !!r.trim()) } : {};
 
 function storageKey(uid: string): string {
   return `im-web.profile.${uid}`;
@@ -58,7 +64,7 @@ export function loadCachedProfile(uid: string): UserProfile | undefined {
     if (!parsed || typeof parsed !== "object") return undefined;
     const value = parsed as Partial<UserProfile>;
     if (typeof value.displayName !== "string") return undefined;
-    return { displayName: value.displayName, avatar: typeof value.avatar === "string" ? value.avatar : "" };
+    return { displayName: value.displayName, avatar: typeof value.avatar === "string" ? value.avatar : "", ...roleList(value.roles) };
   } catch {
     // A corrupt cache must never block sign-in; a missing name is the lesser failure.
     return undefined;
@@ -118,5 +124,5 @@ export async function fetchProfile(session: ConnectSession): Promise<UserProfile
   const fallback = username.startsWith("portal_") ? "" : username;
   const displayName = name || fallback;
   if (!displayName && !avatar) return undefined;
-  return { displayName, avatar };
+  return { displayName, avatar, ...roleList(data.roles) };
 }

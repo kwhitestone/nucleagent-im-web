@@ -155,6 +155,23 @@ test("the profile is cached per account and cleared on sign-out", () => {
   });
 });
 
+// UNI-CARDCONT: the rail's self card shows the shell's Roles row, so the
+// roles from user-info reach it and survive a reload through the cache.
+test("roles are read from user-info and kept in the per-account cache", async () => {
+  await withFetch(
+    async () => json({ code: 0, data: { id: 1, nickName: "陈默", headerImg: "", roles: ["super_admin", "", 7] } }),
+    async () => {
+      assert.deepEqual(await fetchProfile(session), { displayName: "陈默", avatar: "", roles: ["super_admin"] });
+    },
+  );
+  withStorage(() => {
+    saveCachedProfile("10480118", { displayName: "陈默", avatar: "", roles: ["admin"] });
+    assert.deepEqual(loadCachedProfile("10480118")?.roles, ["admin"]);
+    saveCachedProfile("10480118", { displayName: "陈默", avatar: "" });
+    assert.equal(loadCachedProfile("10480118")?.roles, undefined, "an older cache entry has no roles, not an empty claim");
+  });
+});
+
 test("a corrupt cached profile degrades to undefined rather than throwing", () => {
   withStorage(() => {
     globalThis.localStorage.setItem("im-web.profile.10480118", "{not json");

@@ -111,3 +111,27 @@ test("rail Me: the popover gets @username, account kind and enterprise from the 
     "linked / none recorded / older auth / not resolved");
   resetNames();
 });
+
+// UNI-CARDCONT: the rail's "Me" is the same self card as the shell's, so it
+// carries the same rows: user-info roles (the shell's Roles row) and the
+// masked phone from the resolve cache. Never a raw phone: im-web only ever
+// holds auth's phoneMasked.
+test("rail Me: the popover gets roles from user-info and the masked phone, like the shell's self card", async () => {
+  const card = readFileSync("src/components/IdentityCard.vue", "utf8");
+  assert.match(card, /uid: props\.uid, roles: props\.roles,/);
+  assert.match(card, /phoneMasked: phoneMaskedOf\(props\.uid\)/);
+  assert.match(app, /<IdentityCard[\s\S]*?:roles="profileRoles"/);
+  assert.match(app, /profileRoles\.value = profile\.roles \?\? \[\];/, "refreshed from user-info");
+  assert.match(app, /profileRoles\.value = \[\];/, "cleared on teardown: no roles leak into the next account");
+  const { ensureNames, phoneMaskedOf, resetNames } = await import("../src/names.ts");
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({ code: 0, data: { degraded: false, items: [
+    { uid: 1, profile: { nickName: "赖碧威", avatar: "", accountType: "human", provisioned: true, phoneMasked: "138****1234" } },
+    { uid: 5, profile: { nickName: "Ops", avatar: "", accountType: "human", provisioned: true, phoneMasked: null } },
+  ] } }), { status: 200 });
+  try {
+    await ensureNames(["1", "5"], session);
+  } finally { globalThis.fetch = original; }
+  assert.deepEqual([phoneMaskedOf("1"), phoneMaskedOf("5"), phoneMaskedOf("7")], ["138****1234", null, undefined]);
+  resetNames();
+});

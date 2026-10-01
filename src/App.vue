@@ -96,6 +96,7 @@ const searchOpen = ref(false);
 // uses the batch-resolved nickName, and a skeleton until that lands.
 const profileName = ref("");
 const profileAvatar = ref("");
+const profileRoles = ref<string[]>([]);
 const conversations = shallowRef<Conversation[]>([]);
 const groups = ref<IMGroup[]>([]);
 // Populated in startSession once the uid is known: the cache is per-account, so there is
@@ -499,6 +500,7 @@ function startSession(nextSession: ConnectSession): void {
   const cached = loadCachedProfile(nextSession.uid);
   profileName.value = cached?.displayName || "";
   profileAvatar.value = cached?.avatar || "";
+  profileRoles.value = cached?.roles ?? [];
   void loadProfile(nextSession);
   // Names cached by this account on this browser, so a reload renders them instead of
   // raw UIDs. Reading it here (not at module scope) keeps one account's names out of
@@ -518,6 +520,7 @@ async function loadProfile(forSession: ConnectSession): Promise<void> {
   if (!profile || session.value?.uid !== forSession.uid) return;
   profileName.value = profile.displayName;
   profileAvatar.value = profile.avatar;
+  profileRoles.value = profile.roles ?? [];
   saveCachedProfile(forSession.uid, profile);
 }
 
@@ -939,6 +942,7 @@ function teardownSession(): void {
   resetNames();
   profileName.value = "";
   profileAvatar.value = "";
+  profileRoles.value = [];
   dialOpen.value = false;
   dialUid.value = "";
   activeChannel.value = undefined;
@@ -1102,6 +1106,7 @@ onBeforeUnmount(() => {
         :uid="session.uid"
         :display-name="profileName || nameFor(session.uid)"
         :avatar="profileAvatar"
+        :roles="profileRoles"
         @account="openAccount"
         @logout="signOut"
       />
