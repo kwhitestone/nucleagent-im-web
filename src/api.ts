@@ -205,6 +205,15 @@ export async function searchContacts(
   return request<Contact[]>(authBase, `/api/v1/addons/auth/contacts/search?${params}`, session);
 }
 
+export async function recipientEnabled(uid: string, session: ConnectSession): Promise<boolean> {
+  const data = await request<{ enabled: boolean }>(
+    imBase, `/api/v1/im/recipients/${encodeURIComponent(uid)}`, session,
+    { cache: "no-store", signal: AbortSignal.timeout(5000) },
+  );
+  if (typeof data.enabled !== "boolean") throw new Error("Invalid recipient status");
+  return data.enabled;
+}
+
 // A directory entry is either a local account (id = IM uid) or a portal user
 // who has never logged in (id 0, provisioned false) — resolve those with
 // provisionContact before opening a channel.

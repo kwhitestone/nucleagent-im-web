@@ -62,6 +62,7 @@ import EmptyPaths from "./components/EmptyPaths.vue";
 import SystemLine from "./components/SystemLine.vue";
 import { configureSDK } from "./im";
 import { buildOutgoingText } from "./mentions";
+import { sendToEnabledRecipient } from "./send";
 import { isAgentRelayed, readProvenance, rejectionCopy } from "./provenance";
 import {
   applyAgentStreamEvent,
@@ -113,6 +114,9 @@ const messages = shallowRef<Message[]>([]);
 const liveResponses = ref<LiveAgentResponse[]>([]);
 const streamConnection = ref<StreamConnectionState>("connected");
 const draft = ref("");
+const sending = ref(false);
+const recipientDisabled = ref(false);
+watch([activeChannel, draft], () => { recipientDisabled.value = false; });
 const mentionedAgentUids = ref<string[]>([]);
 const loadingHistory = ref(false);
 const historyFinished = ref(false);
@@ -826,20 +830,33 @@ function removeMention(uid: string): void {
 async function sendMessage(): Promise<void> {
   const text = draft.value.trim();
   const channel = activeChannel.value;
-  if (!text || !channel || connection.value !== "connected") return;
+  const sendSession = session.value;
+  if (!text || !channel || !sendSession || sending.value || connection.value !== "connected") return;
 
+  const generation = viewGeneration;
+  const originalDraft = draft.value;
   const mentionUids = mentionedAgentUids.value;
-  draft.value = "";
-  mentionedAgentUids.value = [];
+  const current = () => generation === viewGeneration && session.value === sendSession
+    && connection.value === "connected" && draft.value === originalDraft
+    && mentionedAgentUids.value === mentionUids;
+  sending.value = true;
+  recipientDisabled.value = false;
   try {
-    const content = buildOutgoingText(text, channel.channelType, mentionUids);
-    const message = await WKSDK.shared().chatManager.send(content, channel);
-    messages.value = mergeMessages(messages.value, [message]);
-    scrollToBottom();
+    const outcome = await sendToEnabledRecipient(channel, sendSession, current, async () => {
+      const content = buildOutgoingText(text, channel.channelType, mentionUids);
+      const message = await WKSDK.shared().chatManager.send(content, channel);
+      if (!current()) return;
+      draft.value = "";
+      mentionedAgentUids.value = [];
+      messages.value = mergeMessages(messages.value, [message]);
+      scrollToBottom();
+    });
+    if (current()) recipientDisabled.value = outcome === "disabled";
+    if (outcome === "unavailable") console.warn("im_recipient_check_unavailable");
   } catch (error) {
-    draft.value = text;
-    mentionedAgentUids.value = mentionUids;
-    loginError.value = error instanceof Error ? error.message : t("composer.errSend");
+    if (current()) loginError.value = error instanceof Error ? error.message : t("composer.errSend");
+  } finally {
+    sending.value = false;
   }
 }
 
@@ -1393,6 +1410,7 @@ onBeforeUnmount(() => {
             </div>
             <textarea
               v-model="draft"
+              :readonly="sending"
               :aria-label="t('composer.label')"
               :placeholder="activeAgents.length ? t('composer.placeholderAgents') : t('composer.placeholder')"
               rows="2"
@@ -1402,10 +1420,13 @@ onBeforeUnmount(() => {
           <button
             class="primary send"
             type="submit"
-            :disabled="!draft.trim() || connection !== 'connected'"
+            :disabled="sending || !draft.trim() || connection !== 'connected'"
           >
             {{ t("composer.send") }}
           </button>
+          <p v-if="recipientDisabled" class="composer-hint" role="status" data-testid="recipient-disabled">
+            {{ t("composer.recipientDisabled") }}
+          </p>
           <!-- Enter-to-send is a destructive default, so the UI states it. -->
           <p class="composer-hint">
             <span><kbd>Enter</kbd> {{ t("composer.hintSend") }}</span>

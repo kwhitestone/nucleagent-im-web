@@ -132,6 +132,7 @@ export default {
     hintMention: "呼叫智能体",
     removeMention: "取消呼叫 {'@'}{name}",
     errSend: "消息发送失败",
+    recipientDisabled: "此账号暂不能接收消息。",
     label: "消息",
   },
   system: {

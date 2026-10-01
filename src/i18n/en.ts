@@ -132,6 +132,7 @@ export default {
     hintMention: "mention agent",
     removeMention: "Remove mention {'@'}{name}",
     errSend: "Message send failed",
+    recipientDisabled: "This account cannot receive messages.",
     label: "Message",
   },
   system: {
