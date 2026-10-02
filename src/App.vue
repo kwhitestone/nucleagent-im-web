@@ -867,8 +867,9 @@ function showCreateGroup(preselect: Contact[] = []): void {
 }
 
 // Someone else's profile card (UNI-IMUX3): the shell's account-ui module, the
-// same one the rail "Me" slot opens. Four entry points call this: chat header,
-// message sender, group member, picker ⓘ. Actions follow the context (board
+// same one the rail "Me" slot opens. Five entry points call this: chat header,
+// message sender, group member, picker ⓘ, direct-chat row avatar
+// (UNI-AVATAR-CARD-R2). Actions follow the context (board
 // §03): no "Message" inside that very DM; the picker's primary is "Select".
 const accountUi = useAccountPopover();
 function openProfile(anchor: HTMLElement, target: ProfileTarget): void {
@@ -904,15 +905,20 @@ function senderProfile(message: Message, event: MouseEvent): void {
   });
 }
 
+/** A direct chat's peer: the chat header title and the conversation-row avatar. */
+function personProfile(uid: string, anchor: HTMLElement): void {
+  const contact = knownContacts.value.find((item) => String(item.id) === uid);
+  openProfile(anchor, {
+    uid,
+    known: { nickName: personName(uid), username: contact?.username,
+      accountType: isAgentUid(uid) ? "agent" : contact?.accountType },
+  });
+}
+
 function headerProfile(event: MouseEvent): void {
   const channel = activeChannel.value;
   if (channel?.channelType !== ChannelTypePerson) return;
-  const contact = knownContacts.value.find((item) => String(item.id) === channel.channelID);
-  openProfile(event.currentTarget as HTMLElement, {
-    uid: channel.channelID,
-    known: { nickName: personName(channel.channelID), username: contact?.username,
-      accountType: isAgentUid(channel.channelID) ? "agent" : contact?.accountType },
-  });
+  personProfile(channel.channelID, event.currentTarget as HTMLElement);
 }
 
 function showGroupDetails(): void {
@@ -1191,9 +1197,23 @@ onBeforeUnmount(() => {
       </div>
 
       <nav class="conversation-list" :aria-label="t('list.all')">
-        <button
+        <div
           v-for="conversation in visibleConversations"
           :key="channelKey(conversation.channel)"
+          class="conversation-row"
+        >
+        <!-- Direct chat: the avatar is its own control, a sibling over the
+             avatar column (no button-in-button), opening that person's card;
+             the row still opens the chat (UNI-AVATAR-CARD-R2). Groups: none. -->
+        <button
+          v-if="conversation.channel.channelType === ChannelTypePerson && !isResolving(conversation)"
+          class="avatar-trigger"
+          type="button"
+          data-testid="im-row-avatar-profile"
+          :aria-label="t('profile.view', { name: conversationTitle(conversation) })"
+          @click="personProfile(conversation.channel.channelID, $event.currentTarget as HTMLElement)"
+        />
+        <button
           class="conversation"
           :class="{ active: activeChannel?.isEqual(conversation.channel) }"
           type="button"
@@ -1227,6 +1247,7 @@ onBeforeUnmount(() => {
             >{{ conversation.unread }}</span>
           </span>
         </button>
+        </div>
 
         <!-- Groups this account belongs to but has no conversation row for yet
              (never opened, so WuKongIM has nothing to sync). -->

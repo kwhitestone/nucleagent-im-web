@@ -13,7 +13,7 @@ test("chat header: a direct chat's title is a button that opens the card", () =>
   const header = app.slice(app.indexOf('<header class="chat-header">'), app.indexOf("</header>", app.indexOf('<header class="chat-header">')));
   assert.match(header, /data-testid="im-header-profile"[\s\S]*@click="headerProfile"/);
   assert.match(header, /v-if="activeTitle && activeChannel\?\.channelType === ChannelTypePerson"/, "groups keep a plain title");
-  assert.match(app, /function headerProfile[\s\S]*?openProfile\(event\.currentTarget as HTMLElement, \{\s*uid: channel\.channelID/);
+  assert.match(app, /function headerProfile[\s\S]*?personProfile\(channel\.channelID, event\.currentTarget as HTMLElement\)/);
 });
 
 test("message sender: another person's name is a button; own messages are not", () => {
@@ -134,4 +134,50 @@ test("rail Me: the popover gets roles from user-info and the masked phone, like 
   } finally { globalThis.fetch = original; }
   assert.deepEqual([phoneMaskedOf("1"), phoneMaskedOf("5"), phoneMaskedOf("7")], ["138****1234", null, undefined]);
   resetNames();
+});
+
+// UNI-AVATAR-CARD-R2: the fifth entry point. A direct-chat row's avatar opens
+// that person's card; the row body still opens the chat; group rows unchanged.
+test("conversation row: a direct chat's avatar is its own button that opens that person's card", () => {
+  const list = app.slice(app.indexOf('<nav class="conversation-list"'), app.indexOf("</nav>", app.indexOf('<nav class="conversation-list"')));
+  const trigger = list.match(/<button\s+v-if="([^"]+)"\s+class="avatar-trigger"[\s\S]*?\/>/);
+  assert.ok(trigger, "avatar trigger exists in the row");
+  assert.equal(trigger[1], "conversation.channel.channelType === ChannelTypePerson && !isResolving(conversation)",
+    "direct chats only, and only once the name resolved (the label names the person)");
+  assert.match(trigger[0], /type="button"/);
+  assert.match(trigger[0], /data-testid="im-row-avatar-profile"/);
+  assert.match(trigger[0], /:aria-label="t\('profile\.view', \{ name: conversationTitle\(conversation\) \}\)"/);
+  assert.match(trigger[0], /@click="personProfile\(conversation\.channel\.channelID, \$event\.currentTarget as HTMLElement\)"/);
+  assert.ok(list.indexOf("avatar-trigger") < list.indexOf('class="conversation"'), "focus order: avatar, then row");
+  assert.match(list, /class="conversation"[\s\S]*?@click="openChannel\(conversation\.channel\)"/, "row body still opens the chat");
+  // Header and row avatar share one opener with the person's resolved data.
+  assert.match(app, /function personProfile\(uid: string, anchor: HTMLElement\)[\s\S]*?openProfile\(anchor, \{\s*uid,\s*known: \{ nickName: personName\(uid\), username: contact\?\.username,/);
+  assert.match(app, /function headerProfile[\s\S]*?personProfile\(channel\.channelID, event\.currentTarget as HTMLElement\)/);
+});
+
+test("conversation list: group rows have no avatar trigger", () => {
+  const groupsBlock = app.slice(app.indexOf("<template v-if=\"railMode !== 'agents'\">"), app.indexOf("</template>", app.indexOf("<template v-if=\"railMode !== 'agents'\">")));
+  assert.doesNotMatch(groupsBlock, /avatar-trigger|im-row-avatar-profile/);
+  assert.equal(app.match(/data-testid="im-row-avatar-profile"/g)?.length, 1);
+});
+
+test("no button is nested in another button anywhere in App.vue", async () => {
+  const { parse } = await import("vue/compiler-sfc");
+  const { descriptor } = parse(app, { filename: "App.vue" });
+  const nested: string[] = [];
+  const walk = (node: { type: number; tag?: string; children?: unknown[]; loc?: { start: { line: number } } }, inButton: boolean): void => {
+    const isButton = node.type === 1 && node.tag === "button";
+    if (isButton && inButton) nested.push(`line ${node.loc?.start.line}`);
+    for (const child of (node.children ?? []) as typeof node[]) walk(child, inButton || isButton);
+  };
+  walk(descriptor.template!.ast as never, false);
+  assert.deepEqual(nested, []);
+});
+
+test("avatar trigger CSS: sits over the avatar cell, 36px desktop / 48px phone, visible focus ring", () => {
+  const css = readFileSync("src/style.css", "utf8");
+  assert.match(css, /\.conversation-row \{\s*position: relative;/);
+  assert.match(css, /\.avatar-trigger \{[^}]*position: absolute;[^}]*left: 12px;[^}]*width: 36px;[^}]*height: 36px;/);
+  assert.match(css, /@media \(max-width: 720px\) \{[\s\S]*\.avatar-trigger \{\s*width: 48px;\s*height: 48px;/);
+  assert.match(css, /\.avatar-trigger:focus-visible \{/);
 });
