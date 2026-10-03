@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, reactive, ref, shallowRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   Channel,
@@ -53,7 +53,7 @@ import {
   loadCachedProfile,
   saveCachedProfile,
 } from "./profile";
-import { accountTypeOf, ensureNames, handleFor, isEnterprise, isMissing, nameFor, openIdOf, resetNames } from "./names";
+import { accountTypeOf, avatarFor, ensureNames, handleFor, isEnterprise, isMissing, nameFor, openIdOf, resetNames } from "./names";
 import ContactPicker from "./components/ContactPicker.vue";
 import GroupDialog from "./components/GroupDialog.vue";
 import IdentityCard from "./components/IdentityCard.vue";
@@ -352,6 +352,17 @@ function personName(uid: string): string {
 
 function agentName(uid: string): string {
   return personName(uid) || t("badge.agent");
+}
+
+// A uid whose avatar URL failed to load (404, CORS, ...) falls back to the
+// initial for the rest of the session; shared across every message from them.
+const avatarLoadFailed = reactive(new Set<string>());
+
+/** The message sender's avatar: resolved, else the group member row's; "" = initials (UNI-IM-AVATARS). */
+function messageAvatar(message: Message): string {
+  if (avatarLoadFailed.has(message.fromUID)) return "";
+  const member = activeGroupMembers.value.find((item) => String(item.uid) === message.fromUID);
+  return avatarFor(message.fromUID, member?.avatar);
 }
 
 function isAgentMessage(message: Message): boolean {
@@ -1386,22 +1397,30 @@ onBeforeUnmount(() => {
             class="message"
             :class="{ own: isOwnMessage(message), agent: isAgentMessage(message) }"
           >
-            <span class="sender">
-              <template v-if="isOwnMessage(message)">{{ t("chat.you") }}</template>
-              <button
-                v-else-if="personName(message.fromUID)"
-                class="sender-trigger"
-                type="button"
-                data-testid="im-sender-profile"
-                :aria-label="t('profile.view', { name: personName(message.fromUID) })"
-                @click="senderProfile(message, $event)"
-              >{{ personName(message.fromUID) }}</button>
-              <span v-else class="name-skeleton" :aria-label="t('chat.loading')" />
-              <span v-if="isAgentMessage(message)" class="tag agent">{{ t("badge.agent") }}</span>
-              <span v-if="relayLabel(message)" class="tag relay">{{ relayLabel(message) }}</span>
+            <!-- Message avatar (UNI-IM-AVATARS): resolve data's avatar image,
+                 else the same initial-letter placeholder every other avatar uses. -->
+            <span class="avatar message-avatar" data-testid="im-message-avatar">
+              <img v-if="messageAvatar(message)" :src="messageAvatar(message)" alt="" referrerpolicy="no-referrer" @error="avatarLoadFailed.add(message.fromUID)">
+              <template v-else>{{ (isOwnMessage(message) ? t("chat.you") : personName(message.fromUID))[0]?.toUpperCase() }}</template>
             </span>
-            <div class="bubble">{{ messageText(message) }}</div>
-            <time>{{ messageTime(message) }}</time>
+            <span class="message-copy">
+              <span class="sender">
+                <template v-if="isOwnMessage(message)">{{ t("chat.you") }}</template>
+                <button
+                  v-else-if="personName(message.fromUID)"
+                  class="sender-trigger"
+                  type="button"
+                  data-testid="im-sender-profile"
+                  :aria-label="t('profile.view', { name: personName(message.fromUID) })"
+                  @click="senderProfile(message, $event)"
+                >{{ personName(message.fromUID) }}</button>
+                <span v-else class="name-skeleton" :aria-label="t('chat.loading')" />
+                <span v-if="isAgentMessage(message)" class="tag agent">{{ t("badge.agent") }}</span>
+                <span v-if="relayLabel(message)" class="tag relay">{{ relayLabel(message) }}</span>
+              </span>
+              <div class="bubble">{{ messageText(message) }}</div>
+              <time>{{ messageTime(message) }}</time>
+            </span>
           </article>
 
           <template v-for="response in liveResponses" :key="response.sourceKey">

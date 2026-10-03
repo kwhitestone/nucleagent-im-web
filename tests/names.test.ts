@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ConnectSession } from "../src/api.ts";
-import { accountTypeOf, ensureNames, handleFor, isEnterprise, isMissing, isRealName, nameFor, resetNames } from "../src/names.ts";
+import { accountTypeOf, avatarFor, ensureNames, handleFor, isEnterprise, isMissing, isRealName, nameFor, resetNames } from "../src/names.ts";
 
 const alice: ConnectSession = { uid: "1", token: "im", wsAddr: "ws://im", jwt: "jwt-a" };
 const bob: ConnectSession = { uid: "2", token: "im", wsAddr: "ws://im", jwt: "jwt-b" };
@@ -89,6 +89,21 @@ test("an account switch drops the previous account's names", async () => {
     assert.equal(nameFor("7"), "A7");
     await ensureNames([], bob);
     assert.equal(nameFor("7"), "", "bob's session starts clean");
+  } finally { f.restore(); }
+});
+
+// UNI-IM-AVATARS: resolve's avatar wins; a stored one (e.g. a group member row) is the fallback.
+test("avatarFor: resolved avatar wins, else the stored one, else empty (initials)", async () => {
+  const f = stubFetch(() => ok([
+    { uid: 20, profile: { ...profile("碧"), avatar: "https://cdn.example/20.png" } },
+    { uid: 21, profile: { ...profile("空"), avatar: "" } },
+  ]));
+  try {
+    assert.equal(avatarFor("20", "https://stored/20.png"), "https://stored/20.png", "unresolved: the stored one");
+    await ensureNames(["20", "21"], alice);
+    assert.equal(avatarFor("20", "https://stored/20.png"), "https://cdn.example/20.png", "resolved wins");
+    assert.equal(avatarFor("21", "https://stored/21.png"), "https://stored/21.png", "resolved empty: stored fallback");
+    assert.equal(avatarFor("21"), "", "no avatar anywhere: empty = initials");
   } finally { f.restore(); }
 });
 

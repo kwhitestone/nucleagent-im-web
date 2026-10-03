@@ -44,6 +44,12 @@ export function handleFor(uid: string, stored?: string): string {
   return isRealName(value) ? value.trim() : "";
 }
 
+/** The resolved avatar URL, else a stored one (e.g. a group member row); "" = no avatar (initials fallback). */
+export function avatarFor(uid: string, stored?: string): string {
+  const resolved = known.get(uid)?.avatar;
+  return (resolved || stored || "").trim();
+}
+
 /** Enterprise (portal-linked) per resolve; undefined when not known (older auth, not resolved yet). */
 export function isEnterprise(uid: string): boolean | undefined {
   return known.get(uid)?.enterprise ?? undefined;
