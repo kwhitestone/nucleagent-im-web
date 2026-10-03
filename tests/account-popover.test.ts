@@ -142,3 +142,17 @@ test("profileParams carries the openId through to the shell card", () => {
   assert.equal(p.openId, "nduc_nd_x");
   assert.equal(p.uid, "");
 });
+
+// UNI-AVATAR-UNIFY (baseline ⑧): the rail 我 chip renders the shell's one
+// avatar control from the same module load; an older shell keeps the initial.
+test("avatar control comes from the same module load; absent on an older shell", async () => {
+  const { deps, calls } = fakeDeps();
+  const avatar = { mount: () => () => {} };
+  deps.importModule = async (url) => { calls.import.push(url); return { default: { mount() {}, unmount() {} }, avatar }; };
+  const ui = createAccountPopover(URL_, deps);
+  assert.equal(await ui.avatar(), avatar);
+  assert.equal(await ui.open({} as HTMLElement, params), true);
+  assert.equal(calls.import.length, 1, "one module load for popover and avatar");
+  assert.equal(await createAccountPopover(URL_, fakeDeps().deps).avatar(), undefined, "pre-unify shell");
+  assert.equal(await createAccountPopover("", fakeDeps().deps).avatar(), undefined, "degraded");
+});

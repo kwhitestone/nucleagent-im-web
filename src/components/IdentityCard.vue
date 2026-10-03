@@ -4,9 +4,10 @@
 // Manage account, Sign out — one implementation for every site, loaded at
 // runtime from the shell. If that load fails the card degrades to avatar + name
 // only, with no actions, and never shows an error.
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useAccountPopover } from "../accountPopover";
+import { authBase } from "../api";
 import { getLocale } from "../i18n";
 import { accountTypeOf, handleFor, isEnterprise, openIdOf, phoneMaskedOf } from "../names";
 
@@ -18,6 +19,8 @@ const props = defineProps<{
   avatar?: string;
   /** user-info roles: the same Roles row the shell's self card shows (UNI-CARDCONT). */
   roles?: string[];
+  /** Session access token: the shared avatar resolves this identity's photo from auth with it. */
+  token?: string;
 }>();
 
 const emit = defineEmits<{ account: []; logout: [] }>();
@@ -52,7 +55,29 @@ async function onClick(): Promise<void> {
   if (!shown) open.value = true;
 }
 
-onBeforeUnmount(() => popover.close());
+// UNI-AVATAR-UNIFY: the chip's avatar is the shell's one avatar control
+// (account-ui `avatar`), photo resolved from auth for this session. Until it
+// loads, or if account-ui is down, the initial below stays.
+const avatarHost = ref<HTMLElement>();
+let disposeAvatar: (() => void) | undefined;
+watch(
+  () => [avatarHost.value, props.uid, name.value, props.avatar, props.token] as const,
+  async ([host, uid, display, url, token]) => {
+    const control = await popover.avatar();
+    if (!control || !host || host !== avatarHost.value) return;
+    disposeAvatar?.();
+    disposeAvatar = control.mount(host, {
+      name: display, avatarUrl: url, uid, openId: openIdOf(uid) || undefined,
+      auth: token ? { base: authBase, token } : undefined,
+    });
+  },
+  { immediate: true, flush: "post" },
+);
+
+onBeforeUnmount(() => {
+  disposeAvatar?.();
+  popover.close();
+});
 </script>
 
 <template>
@@ -65,7 +90,7 @@ onBeforeUnmount(() => popover.close());
       :aria-label="t('me.openProfile')"
       @click="onClick"
     >
-      <span class="avatar round">{{ initial }}</span>
+      <span ref="avatarHost" class="avatar round" data-testid="im-identity-avatar">{{ initial }}</span>
       <span class="rail-label">{{ t("tab.me") }}</span>
     </button>
 

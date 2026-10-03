@@ -200,3 +200,13 @@ test("message avatar CSS: a small avatar next to the bubble, image fills the cir
   assert.match(css, /\.message-avatar \{[^}]*width: 28px;[^}]*height: 28px;/);
   assert.match(css, /\.message-avatar img \{[^}]*object-fit: cover;/);
 });
+
+// UNI-AVATAR-UNIFY: the rail chip mounts the shared avatar for this session
+// (uid + openId, resolved with the session token), never its own <img>.
+test("rail Me: the chip avatar is the shell's one avatar control, resolved as this session", () => {
+  const card = readFileSync("src/components/IdentityCard.vue", "utf8");
+  assert.match(card, /await popover\.avatar\(\)/);
+  assert.match(card, /control\.mount\(host, \{\s*name: display, avatarUrl: url, uid, openId: openIdOf\(uid\) \|\| undefined,\s*auth: token \? \{ base: authBase, token \} : undefined,/);
+  assert.doesNotMatch(card, /<img\b/, "no private avatar rendering");
+  assert.match(app, /<IdentityCard[\s\S]*?:token="session\.jwt"/);
+});

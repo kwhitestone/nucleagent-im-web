@@ -48,6 +48,19 @@ export interface ProfileCardMount {
   unmount(): void;
 }
 
+/** The one bottom-left avatar control (UNI-AVATAR-UNIFY), the same module's named export `avatar`. */
+export interface AvatarParams {
+  name: string;
+  avatarUrl?: string;
+  openId?: string;
+  uid?: number | string;
+  auth?: { base: string; token: string };
+}
+
+export interface AvatarMount {
+  mount(host: HTMLElement, params: AvatarParams): () => void;
+}
+
 /** What a trigger knows about the person; the host adds auth, locale and context actions. */
 export interface ProfileTarget {
   /** "" for a not-yet-joined person (then openId, else legacy portalUid). */
@@ -74,6 +87,8 @@ interface AccountUi {
   popover: AccountPopoverMount;
   /** Absent on a shell older than UNI-IMUX3: the card simply does not open. */
   profileCard?: ProfileCardMount;
+  /** Absent on a shell older than UNI-AVATAR-UNIFY: the chip keeps its initial. */
+  avatar?: AvatarMount;
 }
 
 const isMount = (value: unknown): value is { mount: unknown; unmount: unknown } =>
@@ -86,11 +101,12 @@ async function loadAccountUi(url: string, deps: LoaderDeps): Promise<AccountUi> 
   if (!response.ok) throw new Error(`account-ui version ${response.status}`);
   const { version } = (await response.json()) as { version?: unknown };
   if (typeof version !== "string" || !/^[0-9a-f]{8,64}$/.test(version)) throw new Error("account-ui version malformed");
-  const module = (await deps.importModule(`${url}?v=${version}`)) as { default?: unknown; profileCard?: unknown };
+  const module = (await deps.importModule(`${url}?v=${version}`)) as { default?: unknown; profileCard?: unknown; avatar?: unknown };
   if (!isMount(module.default)) throw new Error("account-ui contract mismatch");
   return {
     popover: module.default as AccountPopoverMount,
     profileCard: isMount(module.profileCard) ? module.profileCard as ProfileCardMount : undefined,
+    avatar: typeof (module.avatar as { mount?: unknown } | undefined)?.mount === "function" ? module.avatar as AvatarMount : undefined,
   };
 }
 
@@ -105,6 +121,8 @@ export interface AccountPopover {
   open(el: HTMLElement, params: AccountPopoverParams): Promise<boolean>;
   /** Opens (or toggles) someone else's profile card at `el`; false if unavailable. */
   openProfile(el: HTMLElement, params: ProfileCardParams): Promise<boolean>;
+  /** The shared avatar control (same module load); undefined when degraded or the shell predates it. */
+  avatar(): Promise<AvatarMount | undefined>;
   close(): void;
 }
 
@@ -139,6 +157,9 @@ export function createAccountPopover(url: string, deps: LoaderDeps = realDeps): 
       const card = (await load())?.profileCard;
       card?.mount(el, params);
       return !!card;
+    },
+    async avatar() {
+      return (await load())?.avatar;
     },
     close() {
       // One layer serves both surfaces, so either unmount closes whichever is open.

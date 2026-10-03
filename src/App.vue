@@ -1169,6 +1169,7 @@ onBeforeUnmount(() => {
         :display-name="profileName || nameFor(session.uid)"
         :avatar="profileAvatar"
         :roles="profileRoles"
+        :token="session.jwt"
         @account="openAccount"
         @logout="signOut"
       />
