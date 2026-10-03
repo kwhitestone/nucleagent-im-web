@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { provisionContact, searchDirectory, type ConnectSession } from "../src/api.ts";
+import { provisionAddress, provisionContact, searchDirectory, type ConnectSession } from "../src/api.ts";
 
 const session: ConnectSession = { uid: "1", token: "im", wsAddr: "ws://im", jwt: "jwt" };
 
@@ -53,6 +53,24 @@ test("picking a portal-only user provisions once; provisioned users skip the cal
   assert.equal(f.calls[0].init.method, "POST");
   assert.match(f.calls[0].url, /\/api\/v1\/addons\/auth\/directory\/provision$/);
   assert.deepEqual(JSON.parse(String(f.calls[0].init.body)), { portalUid: 7 });
+});
+
+// UNI-OID: search -> DM addresses by openId; portalUid only for an entry without one.
+test("picking a not-yet-joined person provisions by openId, in the POST body only", async () => {
+  const f = stubFetch([
+    [200, { code: 0, message: "success", data: { id: 42 } }],
+    [200, { code: 0, message: "success", data: { id: 43 } }],
+    [404, { code: 404, message: "user not available" }],
+  ]);
+  try {
+    const contact = await provisionContact({ id: 0, openId: "nduc_sms_x1", portalUid: 7, username: "", displayName: "Ann", accountType: "human", provisioned: false }, session);
+    assert.equal(contact.id, 42);
+    await provisionContact({ id: 0, openId: null, portalUid: 8, username: "", displayName: "Old", accountType: "human", provisioned: false }, session);
+    await assert.rejects(provisionAddress({ openId: "nduc_nd_unknown" }, session), /user not available/);
+  } finally { f.restore(); }
+  assert.deepEqual(f.calls.map((c) => JSON.parse(String(c.init.body))),
+    [{ openId: "nduc_sms_x1" }, { portalUid: 8 }, { openId: "nduc_nd_unknown" }], "openId wins; legacy portalUid only without one");
+  assert.ok(f.calls.every((c) => /\/directory\/provision$/.test(c.url) && c.init.method === "POST"), "never in a URL");
 });
 
 // --- browse (empty query) ------------------------------------------------------

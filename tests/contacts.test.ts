@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   clearCachedContacts,
   contactsFromMembers,
-  isDialableUid,
+  isDialableOpenId,
   loadCachedContacts,
   mergeContacts,
   resolveContactName,
@@ -101,12 +101,14 @@ test("a corrupt or absent cache degrades to empty rather than throwing", () => {
   assert.doesNotThrow(() => saveCachedContacts("2", [alice]));
 });
 
-// P2: only numeric UIDs address a WuKongIM person channel.
-test("only a numeric uid is dialable", () => {
-  assert.equal(isDialableUid("5"), true);
-  assert.equal(isDialableUid("  920001  "), true);
-  assert.equal(isDialableUid(""), false);
-  assert.equal(isDialableUid("abc"), false);
-  assert.equal(isDialableUid("5a"), false);
-  assert.equal(isDialableUid("-5"), false);
+// UNI-OID D3: the dial box takes an Open ID (one token, <=190 chars), not a uid.
+test("an Open ID is dialable; blanks, spaces and oversize are not", () => {
+  assert.equal(isDialableOpenId("nduc_sms_13800000000"), true);
+  assert.equal(isDialableOpenId("  nduc_nd_Ab12  "), true, "pasted with spaces around");
+  assert.equal(isDialableOpenId("5"), true, "shape only: auth decides who it is");
+  assert.equal(isDialableOpenId(""), false);
+  assert.equal(isDialableOpenId("   "), false);
+  assert.equal(isDialableOpenId("nduc nd"), false, "one token");
+  assert.equal(isDialableOpenId("x".repeat(190)), true);
+  assert.equal(isDialableOpenId("x".repeat(191)), false);
 });

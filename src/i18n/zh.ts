@@ -76,8 +76,8 @@ export default {
     noConversationsSub: "先找到一个人或一个智能体，就能开始。",
     pathSearch: "搜索联系人或智能体",
     pathSearchSub: "输入姓名或 {'@'}用户名，至少 2 个字符",
-    pathUid: "按 UID 添加",
-    pathUidSub: "对方把 UID 发给你时用这条，纯数字",
+    pathUid: "按 Open ID 添加",
+    pathUidSub: "对方把名片上的 Open ID 发给你时用这条",
     pathGroup: "新建群聊",
     pathGroupSub: "把人和智能体拉到一起，群里才能 {'@'} 智能体",
     pickConversation: "选一个会话",
@@ -86,9 +86,9 @@ export default {
     noMessagesGroup: "输入 {'@'} 可以呼叫群里的智能体。",
   },
   uid: {
-    dialPlaceholder: "输入 UID（纯数字）",
+    dialPlaceholder: "粘贴对方的 Open ID",
     open: "打开",
-    invalid: "UID 必须是纯数字",
+    notFound: "没有找到这个 Open ID",
   },
   profile: {
     // A uid with no account at all (never a nickName fallback, never the number).

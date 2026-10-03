@@ -30,6 +30,8 @@ export interface AccountPopoverMount {
 
 /** The other-person card, the same module's named export `profileCard` (UNI-IMUX3). */
 export interface ProfileCardParams {
+  /** UNI-OID: the address; precedence openId > uid > portalUid (shell contract). */
+  openId?: string;
   uid: number | string;
   portalUid?: number;
   auth: { base: string; token: string };
@@ -48,8 +50,10 @@ export interface ProfileCardMount {
 
 /** What a trigger knows about the person; the host adds auth, locale and context actions. */
 export interface ProfileTarget {
-  /** "" for a portal-only person (then portalUid). */
+  /** "" for a not-yet-joined person (then openId, else legacy portalUid). */
   uid: string;
+  /** UNI-OID: the person's Open ID when known; agents and local accounts have none (D2). */
+  openId?: string;
   portalUid?: number;
   known?: ProfileCardParams["known"];
   /** Picker ⓘ: the card's primary action picks this person. */
@@ -155,21 +159,27 @@ export function useAccountPopover(): AccountPopover {
 export function profileParams(
   session: ConnectSession,
   locale: "zh" | "en",
-  target: Pick<ProfileCardParams, "uid" | "portalUid" | "known" | "onMessage" | "onAddToGroup" | "onSelect">,
+  target: Pick<ProfileCardParams, "openId" | "uid" | "portalUid" | "known" | "onMessage" | "onAddToGroup" | "onSelect">,
 ): ProfileCardParams {
   return { ...target, auth: { base: authBase, token: session.jwt }, locale };
 }
 
 /**
  * Which context actions the card offers (board §03 anno 3). Pure for tests.
- * Picker ⓘ → only "Select". Yourself, or a portal-only person with no uid yet
- * → none. Inside that very DM → no "Message".
+ * Picker ⓘ → only "Select". Yourself → none. Inside that very DM → no
+ * "Message". UNI-OID: a not-yet-joined person addressed by openId can be
+ * messaged (provisioned on click); one with neither uid nor openId cannot.
  */
 export function profileActions(
-  target: Pick<ProfileTarget, "uid" | "select">,
+  target: Pick<ProfileTarget, "uid" | "openId" | "select">,
   context: { selfUid: string; dmUid?: string },
 ): { select: boolean; message: boolean; addToGroup: boolean } {
   if (target.select) return { select: true, message: false, addToGroup: false };
-  const other = !!target.uid && target.uid !== context.selfUid;
-  return { select: false, message: other && target.uid !== context.dmUid, addToGroup: other };
+  // An openId-only target is never self: the signed-in user always has a uid row.
+  const other = target.uid ? target.uid !== context.selfUid : !!target.openId;
+  return {
+    select: false,
+    message: other && !(target.uid && target.uid === context.dmUid),
+    addToGroup: other && !!target.uid,
+  };
 }

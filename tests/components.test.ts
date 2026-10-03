@@ -63,11 +63,11 @@ test("collapsed: the chip is the popover trigger and renders nothing else", asyn
 test("the empty state offers all three paths with their when-to-use lines", async () => {
   const html = await render(EmptyPaths, {}, "en");
   assert.match(html, /Search people and agents/);
-  assert.match(html, /Add by UID/);
+  assert.match(html, /Add by Open ID/);
   assert.match(html, /Create a group/);
   // Each path says when to use it, not just what it is called.
   assert.match(html, /2 characters minimum/);
-  assert.match(html, /digits only/);
+  assert.match(html, /Open ID from their card/);
   // The one product rule the old UI never stated.
   assert.match(html, /@-mentions only work in groups/);
 });
@@ -81,8 +81,8 @@ test("exactly one path is primary, so the three are not equally weighted", async
 test("the empty state is translated, not hardcoded English", async () => {
   const html = await render(EmptyPaths, {}, "zh");
   assert.match(html, /还没有会话/);
-  assert.match(html, /按 UID 添加/);
-  assert.doesNotMatch(html, /Add by UID/);
+  assert.match(html, /按 Open ID 添加/);
+  assert.doesNotMatch(html, /Add by Open ID/);
 });
 
 // --- system line -------------------------------------------------------------

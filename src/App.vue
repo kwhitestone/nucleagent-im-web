@@ -24,6 +24,7 @@ import {
   imBase,
   imSession,
   listGroups,
+  provisionAddress,
   refreshSession,
   type ConnectSession,
   type Contact,
@@ -33,7 +34,7 @@ import {
 import {
   clearCachedContacts,
   contactsFromMembers,
-  isDialableUid,
+  isDialableOpenId,
   loadCachedContacts,
   mergeContacts,
   resolveContactName,
@@ -52,7 +53,7 @@ import {
   loadCachedProfile,
   saveCachedProfile,
 } from "./profile";
-import { accountTypeOf, ensureNames, handleFor, isEnterprise, isMissing, nameFor, resetNames } from "./names";
+import { accountTypeOf, ensureNames, handleFor, isEnterprise, isMissing, nameFor, openIdOf, resetNames } from "./names";
 import ContactPicker from "./components/ContactPicker.vue";
 import GroupDialog from "./components/GroupDialog.vue";
 import IdentityCard from "./components/IdentityCard.vue";
@@ -107,7 +108,7 @@ const knownContacts = ref<Contact[]>([]);
 // whose refresh cookie is still good.
 const restoring = ref(!embedded && !isCallbackPath(window.location));
 const dialOpen = ref(false);
-const dialUid = ref("");
+const dialOpenId = ref("");
 const activeChannel = ref<Channel>();
 const activeGroupMembers = ref<GroupMember[]>([]);
 const messages = shallowRef<Message[]>([]);
@@ -165,7 +166,9 @@ const visibleUids = computed(() => {
 watch(visibleUids, (uids) => {
   if (session.value) void ensureNames(uids, session.value);
 });
-const dialUidValid = computed(() => isDialableUid(dialUid.value));
+const dialOpenIdValid = computed(() => isDialableOpenId(dialOpenId.value));
+const dialing = ref(false);
+const dialError = ref("");
 const sortedConversations = computed(() =>
   [...conversations.value].sort((left, right) => right.timestamp - left.timestamp),
 );
@@ -776,13 +779,24 @@ function openContact(contact: Contact): void {
   void openChannel(new Channel(String(contact.id), ChannelTypePerson));
 }
 
-// A dialled UID is named by the same batch resolver as every other row.
-function dialUidOpen(): void {
-  if (!dialUidValid.value) return;
-  const uid = dialUid.value.trim();
-  dialUid.value = "";
-  dialOpen.value = false;
-  void openChannel(new Channel(uid, ChannelTypePerson));
+// UNI-OID D3: the dial box takes an Open ID. auth resolves it to this env's uid
+// (provisioning on first contact) in a POST body; the channel stays uid-keyed.
+async function dialOpenIdSubmit(): Promise<void> {
+  const dialSession = session.value;
+  if (!dialOpenIdValid.value || !dialSession || dialing.value) return;
+  dialing.value = true;
+  dialError.value = "";
+  try {
+    const uid = await provisionAddress({ openId: dialOpenId.value.trim() }, dialSession);
+    if (session.value !== dialSession) return;
+    dialOpenId.value = "";
+    dialOpen.value = false;
+    void openChannel(new Channel(String(uid), ChannelTypePerson));
+  } catch {
+    if (session.value === dialSession) dialError.value = t("uid.notFound");
+  } finally {
+    dialing.value = false;
+  }
 }
 
 function openGroup(group: IMGroup): void {
@@ -873,8 +887,10 @@ function showCreateGroup(preselect: Contact[] = []): void {
 // §03): no "Message" inside that very DM; the picker's primary is "Select".
 const accountUi = useAccountPopover();
 function openProfile(anchor: HTMLElement, target: ProfileTarget): void {
-  if (!session.value || !(target.uid || target.portalUid)) return;
+  if (!session.value || !(target.uid || target.openId || target.portalUid)) return;
   const uid = target.uid;
+  // UNI-OID: IM rows know a uid; pass the Open ID too when resolve already named it (D2: none for agents).
+  const openId = target.openId || (uid ? openIdOf(uid) || undefined : undefined);
   const channel = activeChannel.value;
   const can = profileActions(target, {
     selfUid: session.value.uid,
@@ -884,10 +900,21 @@ function openProfile(anchor: HTMLElement, target: ProfileTarget): void {
     id: Number(uid), username: target.known?.username ?? "",
     displayName: personName(uid) || target.known?.nickName || "", accountType: target.known?.accountType ?? "human",
   });
+  // "Send message": a uid opens the DM; an openId alone is resolved (and provisioned once) first.
+  const message = async (): Promise<void> => {
+    const messageSession = session.value;
+    if (uid || !openId || !messageSession) return openContact(contact());
+    try {
+      const id = await provisionAddress({ openId }, messageSession);
+      if (session.value === messageSession) openContact({ ...contact(), id });
+    } catch (error) {
+      if (session.value === messageSession) loginError.value = error instanceof Error ? error.message : t("uid.notFound");
+    }
+  };
   void accountUi.openProfile(anchor, profileParams(session.value, getLocale(), {
-    uid, portalUid: target.portalUid, known: target.known,
+    openId, uid, portalUid: openId ? undefined : target.portalUid, known: target.known,
     onSelect: can.select ? target.select : undefined,
-    onMessage: can.message ? () => openContact(contact()) : undefined,
+    onMessage: can.message ? () => void message() : undefined,
     onAddToGroup: !can.addToGroup ? undefined : () => {
       groupDialogOpen.value = false;
       void nextTick(() => showCreateGroup([contact()]));
@@ -967,7 +994,8 @@ function teardownSession(): void {
   profileAvatar.value = "";
   profileRoles.value = [];
   dialOpen.value = false;
-  dialUid.value = "";
+  dialOpenId.value = "";
+  dialError.value = "";
   activeChannel.value = undefined;
   activeGroupMembers.value = [];
   messages.value = [];
@@ -1178,18 +1206,23 @@ onBeforeUnmount(() => {
           @select="openContact"
           @profile="openProfile"
         />
-        <form v-if="dialOpen" class="uid-dial" @submit.prevent="dialUidOpen">
+        <form v-if="dialOpen" class="uid-dial" @submit.prevent="dialOpenIdSubmit">
           <input
-            v-model="dialUid"
+            v-model="dialOpenId"
             class="contact-search"
-            inputmode="numeric"
+            inputmode="text"
+            maxlength="190"
             :aria-label="t('empty.pathUid')"
+            :aria-invalid="!!dialError"
             :placeholder="t('uid.dialPlaceholder')"
             autocomplete="off"
+            spellcheck="false"
+            @input="dialError = ''"
           >
-          <button class="primary" type="submit" :disabled="!dialUidValid">
+          <button class="primary" type="submit" :disabled="!dialOpenIdValid || dialing">
             {{ t("uid.open") }}
           </button>
+          <p v-if="dialError" class="error" role="alert" data-testid="im-dial-error">{{ dialError }}</p>
         </form>
         <button v-else class="quiet dial-uid" type="button" @click="openDial">
           {{ t("empty.pathUid") }}

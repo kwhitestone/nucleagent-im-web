@@ -76,8 +76,8 @@ export default {
     noConversationsSub: "Find a person or an agent and you're going.",
     pathSearch: "Search people and agents",
     pathSearchSub: "Type a name or {'@'}username — 2 characters minimum",
-    pathUid: "Add by UID",
-    pathUidSub: "Use this when someone sends you their UID — digits only",
+    pathUid: "Add by Open ID",
+    pathUidSub: "Use this when someone sends you the Open ID from their card",
     pathGroup: "Create a group",
     pathGroupSub: "Put people and agents together — {'@'}-mentions only work in groups",
     pickConversation: "Pick a conversation",
@@ -86,9 +86,9 @@ export default {
     noMessagesGroup: "Type {'@'} to call an agent in this group.",
   },
   uid: {
-    dialPlaceholder: "Enter a UID (digits only)",
+    dialPlaceholder: "Paste their Open ID",
     open: "Open",
-    invalid: "A UID is digits only",
+    notFound: "No one has that Open ID",
   },
   profile: {
     // A uid with no account at all (never a nickName fallback, never the number).

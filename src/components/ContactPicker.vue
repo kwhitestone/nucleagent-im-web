@@ -182,7 +182,7 @@ const inputMode = computed(() => (/^\s*\+?\d/.test(query.value) ? "tel" : "searc
 const phoneSearch = computed(() => !!phoneDigits(query.value));
 
 function entryKey(entry: DirectoryEntry): string {
-  return `${entry.id}:${entry.portalUid ?? 0}`;
+  return entry.openId || `${entry.id}:${entry.portalUid ?? 0}`;
 }
 
 // Portal-only people get their local account (and IM uid) on first pick;
@@ -208,7 +208,8 @@ async function choose(entry: DirectoryEntry): Promise<void> {
 function inspect(entry: DirectoryEntry, anchor: HTMLElement): void {
   emit("profile", anchor, {
     uid: entry.provisioned ? String(entry.id) : "",
-    portalUid: entry.provisioned ? undefined : entry.portalUid,
+    openId: entry.openId || undefined,
+    portalUid: entry.provisioned || entry.openId ? undefined : entry.portalUid,
     known: {
       nickName: rowName(entry), username: entry.username, avatar: entry.avatar,
       accountType: entry.accountType, provisioned: entry.provisioned,

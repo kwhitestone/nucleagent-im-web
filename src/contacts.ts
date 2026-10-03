@@ -84,7 +84,11 @@ export function resolveContactName(contacts: Contact[], uid: string): string | u
   return contact?.displayName || contact?.username || undefined;
 }
 
-/** WuKongIM person channels are numeric UIDs; anything else cannot be dialled. */
-export function isDialableUid(value: string): boolean {
-  return /^\d+$/.test(value.trim());
+/**
+ * UNI-OID D3: the dial box takes an Open ID (copied from any card), never an
+ * env-local uid. Shape only (auth decides who it is): one token, ≤190 chars.
+ */
+export function isDialableOpenId(value: string): boolean {
+  const v = value.trim();
+  return v.length > 0 && v.length <= 190 && !/\s/.test(v);
 }

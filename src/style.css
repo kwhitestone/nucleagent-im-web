@@ -578,7 +578,13 @@ textarea:focus {
 
 .uid-dial {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.uid-dial .error {
+  flex-basis: 100%;
+  margin: 0;
 }
 
 .uid-dial .contact-search {

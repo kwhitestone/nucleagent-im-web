@@ -131,4 +131,14 @@ test("context actions: picker → Select only; self or portal-only → none; ins
   assert.deepEqual(profileActions({ uid: "14" }, { selfUid: "1", dmUid: "14" }), { select: false, message: false, addToGroup: true });
   assert.deepEqual(profileActions({ uid: "1" }, self), { select: false, message: false, addToGroup: false });
   assert.deepEqual(profileActions({ uid: "" }, self), { select: false, message: false, addToGroup: false });
+  // UNI-OID: openId only (not joined yet) → "Message" (provisioned on click), no group until there is a uid.
+  assert.deepEqual(profileActions({ uid: "", openId: "nduc_nd_x" }, self), { select: false, message: true, addToGroup: false });
+  assert.deepEqual(profileActions({ uid: "1", openId: "nduc_nd_me" }, self), { select: false, message: false, addToGroup: false }, "self by uid");
+});
+
+test("profileParams carries the openId through to the shell card", () => {
+  const session = { uid: "1", token: "t", wsAddr: "ws://x", jwt: "j" };
+  const p = profileParams(session, "zh", { openId: "nduc_nd_x", uid: "" });
+  assert.equal(p.openId, "nduc_nd_x");
+  assert.equal(p.uid, "");
 });

@@ -61,12 +61,14 @@ test("picker ⓘ: a separate 44px button per row whose card picks that person", 
   const anchor = { id: "i" };
   inspect({ id: 14, username: "lin.yu", displayName: "林雨", accountType: "human", provisioned: true }, anchor);
   inspect({ id: 0, portalUid: 88, username: "portal_3f9a", displayName: "陈雨桐", accountType: "human", provisioned: false }, anchor);
-  const [first, second] = emitted.filter((e) => e[0] === "profile") as Array<[string, unknown, { uid: string; portalUid?: number; known: Record<string, unknown>; select: unknown }]>;
+  inspect({ id: 0, openId: "nduc_sms_x9", portalUid: 89, username: "portal_4a", displayName: "林溪", accountType: "human", provisioned: false }, anchor);
+  const [first, second, third] = emitted.filter((e) => e[0] === "profile") as Array<[string, unknown, { uid: string; openId?: string; portalUid?: number; known: Record<string, unknown>; select: unknown }]>;
   assert.equal(first[1], anchor);
   assert.equal(first[2].uid, "14");
   assert.equal(first[2].known.username, "lin.yu");
   assert.equal(typeof first[2].select, "function", "the card's primary is Select");
   assert.deepEqual([second[2].uid, second[2].portalUid, second[2].known.provisioned], ["", 88, false], "portal-only: by portalUid, never uid 0");
+  assert.deepEqual([third[2].uid, third[2].openId, third[2].portalUid], ["", "nduc_sms_x9", undefined], "UNI-OID: by openId, portalUid dropped");
 });
 
 // GroupDialog imports ContactPicker.vue, which the SFC harness cannot nest, so

@@ -218,6 +218,9 @@ export async function recipientEnabled(uid: string, session: ConnectSession): Pr
 // who has never logged in (id 0, provisioned false) — resolve those with
 // provisionContact before opening a channel.
 export interface DirectoryEntry extends Contact {
+  /** UNI-OID: the person's address (Agentia Open ID); null for local-only accounts (D2). Absent on an older auth. */
+  openId?: string | null;
+  /** Legacy (UNI-OID phase 3 removes it): used only when an entry has no openId. */
   portalUid?: number;
   provisioned: boolean;
   /** B2 (UNI-IMUX4): https avatar, "" when none. Absent on an older auth. */
@@ -358,11 +361,21 @@ export async function resolveUsers(uids: number[], session: ConnectSession): Pro
 // contact. Messages sent to that uid wait in WuKongIM until they first log in.
 export async function provisionContact(entry: DirectoryEntry, session: ConnectSession): Promise<Contact> {
   if (entry.provisioned && entry.id) return entry;
+  const id = await provisionAddress(entry.openId ? { openId: entry.openId } : { portalUid: entry.portalUid }, session);
+  return { id, username: entry.username, displayName: entry.displayName, accountType: entry.accountType };
+}
+
+/**
+ * UNI-OID: an Open ID (or, legacy, a portal id) → this env's IM uid, provisioning
+ * on first contact (idempotent: an existing person just returns their uid). The
+ * address travels in the POST body only, never in a URL. 404 = no such person.
+ */
+export async function provisionAddress(address: { openId: string } | { portalUid?: number }, session: ConnectSession): Promise<number> {
   const { id } = await request<{ id: number }>(authBase, "/api/v1/addons/auth/directory/provision", session, {
     method: "POST",
-    body: JSON.stringify({ portalUid: entry.portalUid }),
+    body: JSON.stringify(address),
   });
-  return { id, username: entry.username, displayName: entry.displayName, accountType: entry.accountType };
+  return id;
 }
 
 export function listGroups(session: ConnectSession): Promise<IMGroup[]> {
