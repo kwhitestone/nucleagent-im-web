@@ -62,6 +62,7 @@ import { getLocale } from "./i18n";
 import EmptyPaths from "./components/EmptyPaths.vue";
 import SystemLine from "./components/SystemLine.vue";
 import { configureSDK } from "./im";
+import { listAgents, uncontactedAgents, type DirectoryAgent } from "./agents";
 import { buildOutgoingText } from "./mentions";
 import { sendToEnabledRecipient } from "./send";
 import { isAgentRelayed, readProvenance, rejectionCopy } from "./provenance";
@@ -101,6 +102,8 @@ const profileAvatar = ref("");
 const profileRoles = ref<string[]>([]);
 const conversations = shallowRef<Conversation[]>([]);
 const groups = ref<IMGroup[]>([]);
+// UNI-IM-REDESIGN: every agent this user can DM (active definitions with an IM identity).
+const directoryAgents = ref<DirectoryAgent[]>([]);
 // Populated in startSession once the uid is known: the cache is per-account, so there is
 // nothing meaningful to read before then.
 const knownContacts = ref<Contact[]>([]);
@@ -160,6 +163,7 @@ const visibleUids = computed(() => {
   for (const message of messages.value) if (message.fromUID) uids.add(message.fromUID);
   for (const member of activeGroupMembers.value) uids.add(String(member.uid));
   for (const response of liveResponses.value) uids.add(response.agentUid);
+  for (const agent of directoryAgents.value) uids.add(String(agent.uid));
   if (activeChannel.value?.channelType === ChannelTypePerson) uids.add(activeChannel.value.channelID);
   return [...uids];
 });
@@ -175,11 +179,12 @@ const sortedConversations = computed(() =>
 
 /** UIDs of every agent this account has seen, so the rail can filter by them. */
 const knownAgentUids = computed(
-  () => new Set(
-    knownContacts.value
+  () => new Set([
+    ...knownContacts.value
       .filter((contact) => contact.accountType === "agent")
       .map((contact) => String(contact.id)),
-  ),
+    ...directoryAgents.value.map((agent) => String(agent.uid)),
+  ]),
 );
 
 function isAgentUid(uid: string): boolean {
@@ -202,6 +207,37 @@ const visibleConversations = computed(() => {
   }
   return sortedConversations.value;
 });
+
+/** Groups with no conversation row yet (never opened, so WuKongIM has nothing to sync). */
+const unopenedGroups = computed(() => railMode.value === "agents" ? [] : groups.value.filter(
+  (item) => !conversations.value.some((c) => c.channel.channelID === item.wukongChannelId),
+));
+
+/** Agents tab: directory agents with no conversation yet, below the ones already talked to. */
+const unopenedAgents = computed(() => railMode.value !== "agents" ? [] : uncontactedAgents(
+  directoryAgents.value,
+  conversations.value.filter((c) => c.channel.channelType === ChannelTypePerson).map((c) => c.channel.channelID),
+));
+
+/** A definition's description: the agent row's subtitle before there is a last message. */
+function agentDescription(uid: string): string {
+  return directoryAgents.value.find((agent) => String(agent.uid) === uid)?.description || "";
+}
+
+function agentRowName(agent: DirectoryAgent): string {
+  return personName(String(agent.uid)) || agent.name;
+}
+
+function openAgent(agent: DirectoryAgent): void {
+  void openChannel(new Channel(String(agent.uid), ChannelTypePerson));
+}
+
+// R1: on a phone the open chat covers the list, so a rail tap would filter a
+// list nobody can see. Close the chat there; desktop shows both side by side.
+function selectRail(mode: RailMode): void {
+  railMode.value = mode;
+  if (window.matchMedia("(max-width: 720px)").matches) activeChannel.value = undefined;
+}
 
 const totalUnread = computed(
   () => conversations.value.reduce((sum, item) => sum + (item.unread || 0), 0),
@@ -237,7 +273,7 @@ const respondingAgent = computed(() => {
 
 function conversationSubtitle(conversation: Conversation): string {
   const last = conversation.lastMessage;
-  if (!last) return "";
+  if (!last) return agentDescription(conversation.channel.channelID);
   const body = messageText(last);
   if (isOwnMessage(last)) return `${t("list.you")} ${body}`;
   // Group previews name the speaker; a direct chat's speaker is already the row.
@@ -524,6 +560,9 @@ function startSession(nextSession: ConnectSession): void {
   // raw UIDs. Reading it here (not at module scope) keeps one account's names out of
   // another's session when the shell swaps users without a sign-out.
   knownContacts.value = loadCachedContacts(nextSession.uid);
+  void listAgents(nextSession).then((agents) => {
+    if (session.value?.uid === nextSession.uid) directoryAgents.value = agents;
+  });
   const sdk = configureSDK(nextSession);
   installListeners();
   connection.value = "connecting";
@@ -999,6 +1038,7 @@ function teardownSession(): void {
   session.value = undefined;
   conversations.value = [];
   groups.value = [];
+  directoryAgents.value = [];
   knownContacts.value = [];
   resetNames();
   profileName.value = "";
@@ -1119,7 +1159,7 @@ onBeforeUnmount(() => {
         :title="t('list.all')"
         :aria-label="t('list.all')"
         :aria-pressed="railMode === 'all'"
-        @click="railMode = 'all'"
+        @click="selectRail('all')"
       >
         <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
         <span class="rail-label">{{ t("tab.chats") }}</span>
@@ -1132,7 +1172,7 @@ onBeforeUnmount(() => {
         :title="t('list.groups')"
         :aria-label="t('list.groups')"
         :aria-pressed="railMode === 'groups'"
-        @click="railMode = 'groups'"
+        @click="selectRail('groups')"
       >
         <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
         <span class="rail-label">{{ t("tab.groups") }}</span>
@@ -1146,7 +1186,7 @@ onBeforeUnmount(() => {
         :title="t('list.agents')"
         :aria-label="t('list.agents')"
         :aria-pressed="railMode === 'agents'"
-        @click="railMode = 'agents'"
+        @click="selectRail('agents')"
       >
         <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2L4 7v10l8 5 8-5V7l-8-5z" /><path d="M12 22V12" /><path d="M4 7l8 5 8-5" /></svg>
         <span class="rail-label">{{ t("tab.agents") }}</span>
@@ -1215,6 +1255,8 @@ onBeforeUnmount(() => {
         <ContactPicker
           :session="session"
           :placeholder="t('list.searchPlaceholder')"
+          :agents="directoryAgents"
+          @agent="openAgent"
           @select="openContact"
           @profile="openProfile"
         />
@@ -1296,25 +1338,53 @@ onBeforeUnmount(() => {
 
         <!-- Groups this account belongs to but has no conversation row for yet
              (never opened, so WuKongIM has nothing to sync). -->
-        <template v-if="railMode !== 'agents'">
+        <button
+          v-for="group in unopenedGroups"
+          :key="group.id"
+          class="conversation"
+          :class="{ active: activeChannel?.channelID === group.wukongChannelId }"
+          type="button"
+          @click="openGroup(group)"
+        >
+          <span class="avatar group">#</span>
+          <span class="conversation-copy">
+            <span class="conversation-name"><strong>{{ group.title }}</strong></span>
+            <small>{{ t("empty.noMessages") }}</small>
+          </span>
+        </button>
+
+        <!-- Agents tab (UNI-IM-REDESIGN): every agent this user can DM, even
+             before the first message. Tapping opens a normal direct chat. -->
+        <div v-for="agent in unopenedAgents" :key="agent.uid" class="conversation-row" data-testid="im-agent-row">
           <button
-            v-for="group in groups.filter((item) => !conversations.some((c) => c.channel.channelID === item.wukongChannelId))"
-            :key="group.id"
-            class="conversation"
-            :class="{ active: activeChannel?.channelID === group.wukongChannelId }"
+            class="avatar-trigger"
             type="button"
-            @click="openGroup(group)"
+            :aria-label="t('profile.view', { name: agentRowName(agent) })"
+            @click="personProfile(String(agent.uid), $event.currentTarget as HTMLElement)"
+          />
+          <button
+            class="conversation"
+            :class="{ active: activeChannel?.channelID === String(agent.uid) }"
+            type="button"
+            @click="openAgent(agent)"
           >
-            <span class="avatar group">#</span>
+            <span class="avatar bot">{{ [...agentRowName(agent)][0]?.toUpperCase() }}</span>
             <span class="conversation-copy">
-              <span class="conversation-name"><strong>{{ group.title }}</strong></span>
-              <small>{{ t("empty.noMessages") }}</small>
+              <span class="conversation-name">
+                <strong>{{ agentRowName(agent) }}</strong>
+                <span class="tag agent">{{ t("badge.agent") }}</span>
+              </span>
+              <small>{{ agent.description || t("empty.noMessages") }}</small>
             </span>
           </button>
-        </template>
+        </div>
 
-        <p v-if="!visibleConversations.length && !groups.length && !isFirstRun" class="empty-list">
-          {{ t("empty.noConversations") }}
+        <p
+          v-if="!isFirstRun && !visibleConversations.length && !unopenedGroups.length && !unopenedAgents.length"
+          class="empty-list"
+          data-testid="im-empty-tab"
+        >
+          {{ t(railMode === "groups" ? "empty.noGroups" : railMode === "agents" ? "empty.noAgents" : "empty.noConversations") }}
         </p>
       </nav>
     </aside>

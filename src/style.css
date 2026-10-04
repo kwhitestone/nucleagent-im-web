@@ -1346,6 +1346,14 @@ kbd {
   font-size: 12px;
 }
 
+/* Search section headings (UNI-IM-REDESIGN): 智能体 above 联系人. */
+.picker-section {
+  margin: 6px 8px 2px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
 /* Zero-result state. Nothing rendered here before, so "no matches" and "still
  * searching" looked identical. */
 .picker-empty {

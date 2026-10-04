@@ -12,6 +12,7 @@ import {
   type DirectoryEntry,
 } from "../api";
 import { ensureNames, handleFor, isEnterprise, nameFor } from "../names";
+import { matchAgents, type DirectoryAgent } from "../agents";
 import type { ProfileTarget } from "../accountPopover";
 
 const { t } = useI18n();
@@ -23,12 +24,15 @@ const props = withDefaults(defineProps<{
   excludeUids?: number[];
   label?: string;
   placeholder?: string;
+  /** UNI-IM-REDESIGN: when given, matching agents get their own section above people. */
+  agents?: DirectoryAgent[];
 }>(), {
   modelValue: () => [],
   multiple: false,
   excludeUids: () => [],
   label: "",
   placeholder: "",
+  agents: () => [],
 });
 
 const emit = defineEmits<{
@@ -36,6 +40,7 @@ const emit = defineEmits<{
   "update:modelValue": [contacts: Contact[]];
   /** ⓘ: show this person's profile card; its primary action picks them (board §04). */
   profile: [anchor: HTMLElement, target: ProfileTarget];
+  agent: [agent: DirectoryAgent];
 }>();
 
 const query = ref("");
@@ -77,6 +82,22 @@ watch(query, (value) => {
     }
   }, 250);
 });
+
+// Agents match on name or description (contains, not prefix): users remember
+// what an agent does more often than its exact name. Shown once, so the same
+// uid is dropped from the people rows below.
+const agentMatches = computed(() => matchAgents(props.agents, query.value, (uid) => nameFor(uid)));
+const peopleResults = computed(() => {
+  const agentUids = new Set(agentMatches.value.map((agent) => agent.uid));
+  return results.value.filter((item) => !agentUids.has(item.id));
+});
+
+function chooseAgent(agent: DirectoryAgent): void {
+  emit("agent", agent);
+  query.value = "";
+  results.value = [];
+  open.value = false;
+}
 
 function visible(items: DirectoryEntry[]): DirectoryEntry[] {
   const excluded = new Set([...props.excludeUids, ...props.modelValue.map((contact) => contact.id)]);
@@ -256,6 +277,20 @@ onBeforeUnmount(() => {
         {{ rowName(contact) }} <span aria-hidden="true">×</span>
       </button>
     </div>
+    <!-- Agents first (UNI-IM-REDESIGN). Browsing means an empty query, so never both. -->
+    <div v-if="agentMatches.length" class="contact-results" role="listbox" data-testid="im-search-agents">
+      <p class="picker-section">{{ t("search.agentsSection") }}</p>
+      <div v-for="agent in agentMatches" :key="agent.uid" class="contact-row">
+        <button class="contact-result" type="button" role="option" @click="chooseAgent(agent)">
+          <span>
+            <strong>{{ nameFor(String(agent.uid)) || agent.name }}</strong>
+            <small v-if="agent.description">{{ agent.description }}</small>
+          </span>
+          <span class="account-badge agent">{{ t("badge.agent") }}</span>
+        </button>
+      </div>
+      <p v-if="peopleResults.length" class="picker-section">{{ t("search.peopleSection") }}</p>
+    </div>
     <!-- Browse mode: everyone, by name. Same rows and badges as search. -->
     <div v-if="browsing" class="contact-results" role="listbox" data-testid="im-directory-browse">
       <div v-for="contact in browseShown" :key="entryKey(contact)" class="contact-row">
@@ -290,8 +325,8 @@ onBeforeUnmount(() => {
     <p v-else-if="query.trim().length === 1" class="picker-status">{{ t("search.minChars") }}</p>
     <p v-else-if="loading" class="picker-status">{{ t("search.searching") }}</p>
     <p v-else-if="error" class="picker-status error" role="alert">{{ error }}</p>
-    <div v-else-if="results.length" class="contact-results" role="listbox">
-      <div v-for="contact in results" :key="entryKey(contact)" class="contact-row">
+    <div v-else-if="peopleResults.length" class="contact-results" role="listbox">
+      <div v-for="contact in peopleResults" :key="entryKey(contact)" class="contact-row">
         <button class="contact-result" type="button" role="option" @click="choose(contact)">
           <span>
             <strong>{{ rowName(contact) }}</strong>
@@ -321,7 +356,7 @@ onBeforeUnmount(() => {
          nothing looked identical to one still in flight. The copy states that
          matching is prefix-only: searching mid-string silently returns nobody
          and otherwise reads as "this person does not exist". -->
-    <div v-else-if="query.trim().length >= minContactQueryLength" class="picker-empty">
+    <div v-else-if="query.trim().length >= minContactQueryLength && !agentMatches.length" class="picker-empty">
       <p>{{ t("search.noResults", { query: query.trim() }) }}</p>
       <small>{{ t(phoneSearch ? "search.phoneHint" : "search.prefixHint") }}</small>
     </div>

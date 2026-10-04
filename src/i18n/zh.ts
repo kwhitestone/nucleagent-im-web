@@ -56,6 +56,8 @@ export default {
     phoneHint: "没有手机号包含这些数字。部分号码在来源处已隐藏中间位，只能按可见数字搜到。",
     errFailed: "联系人搜索失败",
     placeholder: "搜索联系人、智能体或手机号",
+    agentsSection: "智能体",
+    peopleSection: "联系人",
     more: "显示更多",
     degraded: "目录暂不可用，仅显示已有联系人。",
     loadMore: "加载更多",
@@ -73,6 +75,8 @@ export default {
   },
   empty: {
     noConversations: "还没有会话",
+    noGroups: "还没有群聊",
+    noAgents: "还没有可用的智能体",
     noConversationsSub: "先找到一个人或一个智能体，就能开始。",
     pathSearch: "搜索联系人或智能体",
     pathSearchSub: "输入姓名或 {'@'}用户名，至少 2 个字符",
