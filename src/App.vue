@@ -61,7 +61,8 @@ import { profileActions, profileParams, useAccountPopover, type ProfileTarget } 
 import { getLocale } from "./i18n";
 import EmptyPaths from "./components/EmptyPaths.vue";
 import SystemLine from "./components/SystemLine.vue";
-import { configureSDK } from "./im";
+import { configureSDK, loadMoreConversations, markRead } from "./im";
+import { carryPersisted, earlierCursor, mergeMessages, messageKey, remintGuard } from "./history";
 import { listAgents, uncontactedAgents, type DirectoryAgent } from "./agents";
 import { buildOutgoingText } from "./mentions";
 import { sendToEnabledRecipient } from "./send";
@@ -124,6 +125,8 @@ watch([activeChannel, draft], () => { recipientDisabled.value = false; });
 const mentionedAgentUids = ref<string[]>([]);
 const loadingHistory = ref(false);
 const historyFinished = ref(false);
+const loadingConversations = ref(false);
+const hasMoreConversations = ref(true);
 const chatElement = ref<HTMLElement>();
 const groupDialogOpen = ref(false);
 const dialogGroup = ref<IMGroup>();
@@ -343,10 +346,6 @@ function channelKey(channel: Channel): string {
   return `${channel.channelType}:${channel.channelID}`;
 }
 
-function messageKey(message: Message): string {
-  return message.messageID || message.clientMsgNo || `${message.fromUID}:${message.messageSeq}`;
-}
-
 function messageText(message?: Message): string {
   if (!message) return "";
   if (message.streamText !== undefined) return message.streamText || "...";
@@ -435,14 +434,6 @@ function scrollToBottom(): void {
   });
 }
 
-function mergeMessages(current: Message[], incoming: Message[]): Message[] {
-  const merged = new Map(current.map((message) => [messageKey(message), message]));
-  for (const message of incoming) merged.set(messageKey(message), message);
-  return [...merged.values()].sort(
-    (left, right) => left.messageSeq - right.messageSeq || left.timestamp - right.timestamp,
-  );
-}
-
 function reconcileResponses(): void {
   liveResponses.value = reconcileLiveResponses(
     liveResponses.value,
@@ -458,14 +449,21 @@ function upsertConversation(conversation: Conversation): void {
   ];
 }
 
+// W5 (spec §2.4): a WuKong reset forgets registered connect tokens, so the WS gets
+// auth-fail. Re-mint once (the mint re-registers the token) and reconnect; a second
+// failure before any success stays on authFailed instead of looping.
+const remint = remintGuard();
+
 const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
   if (status === ConnectStatus.Connected) {
     connection.value = "connected";
-    void Promise.all([syncConversations(), syncGroups()]);
+    remint.reset();
+    void Promise.all([syncConversations(), syncGroups(), refreshActiveHistory()]);
   } else if (status === ConnectStatus.Connecting) {
     connection.value = "connecting";
   } else if (status === ConnectStatus.ConnectFail && reasonCode === 2) {
     connection.value = "authFailed";
+    if (remint.take()) void remintConnectToken();
   } else {
     connection.value = "disconnected";
   }
@@ -485,6 +483,8 @@ const messageListener: MessageListener = (message) => {
     messages.value = mergeMessages(messages.value, [message]);
     reconcileResponses();
     scrollToBottom();
+    // R6: the server counted it unread; the user is looking at it.
+    if (!isOwnMessage(message)) markChannelRead(message.channel);
   }
 };
 
@@ -500,7 +500,7 @@ const eventListener: WKEventListener = (event: WKEvent) => {
   if (!update) return;
 
   if (existing) {
-    const changed = Object.assign(new Message(), existing);
+    const changed = carryPersisted(existing, Object.assign(new Message(), existing));
     changed.streamText = update.text;
     changed.content = new MessageText(update.text || "...");
     messages.value = messages.value.map((message) => message === existing ? changed : message);
@@ -700,8 +700,83 @@ void restoreSession();
 async function syncConversations(): Promise<void> {
   try {
     conversations.value = await WKSDK.shared().conversationManager.sync();
+    hasMoreConversations.value = true;
   } catch (error) {
     loginError.value = error instanceof Error ? error.message : t("chat.errConversations");
+  }
+}
+
+// Q3: the list is cursor-paged (50 per page). Scrolling near the bottom loads the next page.
+async function loadMoreConversationPage(): Promise<void> {
+  const pageSession = session.value;
+  if (!pageSession || loadingConversations.value || !hasMoreConversations.value) return;
+  loadingConversations.value = true;
+  try {
+    const page = await loadMoreConversations(pageSession);
+    if (session.value !== pageSession) return;
+    hasMoreConversations.value = page.length > 0;
+    const known = new Set(conversations.value.map((item) => channelKey(item.channel)));
+    const fresh = page.filter((item) => !known.has(channelKey(item.channel)));
+    conversations.value = [...conversations.value, ...fresh];
+    const sdk = WKSDK.shared().conversationManager;
+    sdk.conversations = [...sdk.conversations, ...fresh];
+  } catch (error) {
+    loginError.value = error instanceof Error ? error.message : t("chat.errConversations");
+  } finally {
+    loadingConversations.value = false;
+  }
+}
+
+function conversationListScrolled(event: Event): void {
+  const list = event.target as HTMLElement;
+  if (list.scrollHeight - list.scrollTop - list.clientHeight < 120) void loadMoreConversationPage();
+}
+
+// R6: opening a channel, or a message arriving while it is open, clears its unread on the
+// server and locally. A failed call is harmless: the badge comes back on the next sync.
+function markChannelRead(channel: Channel): void {
+  const readSession = session.value;
+  if (!readSession) return;
+  const local = conversations.value.find((item) => item.channel.isEqual(channel));
+  if (local?.unread) {
+    local.unread = 0;
+    conversations.value = [...conversations.value];
+  }
+  void markRead(channel, readSession).catch(() => undefined);
+}
+
+async function remintConnectToken(): Promise<void> {
+  const current = session.value;
+  if (!current) return;
+  try {
+    const next = await imSession({ accessToken: current.jwt });
+    if (session.value !== current) return;
+    session.value = next;
+    WKSDK.shared().disconnect(); // close the refused socket before the SDK opens a new one
+    const sdk = configureSDK(next);
+    connection.value = "connecting";
+    sdk.connect();
+  } catch {
+    // The access token itself is stale: leave authFailed; the shell/refresh path recovers it.
+  }
+}
+
+// R5: messages sent while the WS was down never reach this tab live. On (re)connect, pull the
+// open channel's latest page again and merge it; an initial connect with no chat open is a no-op.
+async function refreshActiveHistory(): Promise<void> {
+  const channel = activeChannel.value;
+  if (!channel || loadingHistory.value) return;
+  const generation = viewGeneration;
+  try {
+    const latest = await WKSDK.shared().chatManager.syncMessages(channel, {
+      limit: 30, startMessageSeq: 0, endMessageSeq: 0, pullMode: PullMode.Up,
+    });
+    if (generation !== viewGeneration) return;
+    messages.value = mergeMessages(messages.value, latest);
+    reconcileResponses();
+    scrollToBottom();
+  } catch {
+    // The next reconnect or a reopen retries; the open view keeps what it has.
   }
 }
 
@@ -794,6 +869,7 @@ async function openChannel(channel: Channel): Promise<void> {
   historyFinished.value = false;
   loadingHistory.value = true;
   startAgentStream(channel, generation);
+  markChannelRead(channel);
   WKSDK.shared().conversationManager.openConversation =
     WKSDK.shared().conversationManager.findConversation(channel)
     || WKSDK.shared().conversationManager.createEmptyConversation(channel);
@@ -855,22 +931,27 @@ function openGroup(group: IMGroup): void {
 
 async function loadEarlier(): Promise<void> {
   const channel = activeChannel.value;
-  const first = messages.value[0];
-  if (!channel || !first || loadingHistory.value || historyFinished.value) return;
+  // R4: live messages carry WuKong seqs; only history rows hold im's cursor.
+  const cursor = earlierCursor(messages.value);
+  if (!channel || cursor === undefined || loadingHistory.value || historyFinished.value) return;
+  if (cursor === 0) {
+    historyFinished.value = true; // the oldest row is id 1: nothing is older
+    return;
+  }
 
   const generation = viewGeneration;
   loadingHistory.value = true;
   try {
     const history = await WKSDK.shared().chatManager.syncMessages(channel, {
       limit: 30,
-      startMessageSeq: Math.max(0, first.messageSeq - 1),
+      startMessageSeq: cursor,
       endMessageSeq: 0,
       pullMode: PullMode.Down,
     });
     if (generation !== viewGeneration) return;
     messages.value = mergeMessages(history, messages.value);
     reconcileResponses();
-    historyFinished.value = history.length < 30 || first.messageSeq <= 1;
+    historyFinished.value = history.length < 30 || cursor <= 1;
   } catch (error) {
     loginError.value = error instanceof Error ? error.message : t("chat.errHistory");
   } finally {
@@ -1283,7 +1364,7 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <nav class="conversation-list" :aria-label="t('list.all')">
+      <nav class="conversation-list" :aria-label="t('list.all')" @scroll.passive="conversationListScrolled">
         <div
           v-for="conversation in visibleConversations"
           :key="channelKey(conversation.channel)"

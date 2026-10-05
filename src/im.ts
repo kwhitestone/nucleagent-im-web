@@ -8,7 +8,8 @@ import {
   WKSDK,
   type SyncOptions,
 } from "wukongimjssdk";
-import { postIM, type ConnectSession } from "./api";
+import { postIM, type ConnectSession } from "./api.ts";
+import { markPersisted } from "./history.ts";
 
 type Row = Record<string, any>;
 
@@ -38,7 +39,8 @@ function timestampOf(row: Row): number {
 
 export function messageFromRow(row: Row, fallbackChannel?: Channel): Message {
   const message = new Message();
-  message.messageID = String(row.message_id_str || row.message_id || "");
+  // message_idstr: the snowflake exceeds 2^53, so the numeric message_id is not exact in JS.
+  message.messageID = String(row.message_idstr || row.message_id_str || row.message_id || "");
   message.messageSeq = Number(row.message_seq || 0);
   message.clientMsgNo = String(row.client_msg_no || message.messageID || crypto.randomUUID());
   message.clientSeq = Number(row.client_seq || 0);
@@ -55,7 +57,7 @@ export function messageFromRow(row: Row, fallbackChannel?: Channel): Message {
   return message;
 }
 
-function conversationFromRow(row: Row): Conversation {
+export function conversationFromRow(row: Row): Conversation {
   const conversation = new Conversation();
   conversation.channel = new Channel(String(row.channel_id), Number(row.channel_type));
   conversation.unread = Number(row.unread || 0);
@@ -105,12 +107,47 @@ export function configureSDK(session: ConnectSession): WKSDK {
       limit: options.limit,
       stream_v2: 1,
     }, session);
-    return rows(result, "messages").map((row) => messageFromRow(row, channel));
+    return rows(result, "messages").map((row) => markPersisted(messageFromRow(row, channel)));
   };
+  // The SDK's sync() loads the first page; later pages come from loadConversationPage.
   config.provider.syncConversationsCallback = async () => {
-    const result = await postIM<unknown>("/api/v1/im/conversation/list", { limit: 200 }, session);
-    return rows(result, "conversations").map(conversationFromRow);
+    const page = await loadConversationPage(session);
+    conversationCursor = page.nextCursor;
+    return page.conversations;
   };
   sdk.config = config;
   return sdk;
+}
+
+/** The cursor for the next conversation page; "" once the list is exhausted. */
+export let conversationCursor = "";
+
+export interface ConversationPage {
+  conversations: Conversation[];
+  nextCursor: string;
+}
+
+/** One page of the cursor-paged conversation list (UNI-IM-DB W4: default 50, newest first). */
+export async function loadConversationPage(session: ConnectSession, cursor = ""): Promise<ConversationPage> {
+  const result = await postIM<Row>("/api/v1/im/conversation/list", cursor ? { cursor } : {}, session);
+  return {
+    conversations: rows(result, "conversations").map(conversationFromRow),
+    nextCursor: result && !result.done ? String(result.next_cursor || "") : "",
+  };
+}
+
+/** The next page after the SDK's first one; [] when there is none. */
+export async function loadMoreConversations(session: ConnectSession): Promise<Conversation[]> {
+  if (!conversationCursor) return [];
+  const page = await loadConversationPage(session, conversationCursor);
+  conversationCursor = page.nextCursor;
+  return page.conversations;
+}
+
+/** Clears the caller's unread count on a channel (UNI-IM-DB W4 /conversation/read). */
+export function markRead(channel: Channel, session: ConnectSession): Promise<unknown> {
+  return postIM("/api/v1/im/conversation/read", {
+    channel_id: channel.channelID,
+    channel_type: channel.channelType,
+  }, session);
 }
