@@ -78,6 +78,17 @@ function rows(value: unknown, key: string): Row[] {
   return [];
 }
 
+/**
+ * The shell re-pushes a renewed login token every ~10 min. For the same user the live socket
+ * stays up (tearing it down was the 未连接 flash); only the SDK's future reconnects take the
+ * fresh IM token. Returns false when the user changed, so the caller rebuilds the session.
+ */
+export function renewInPlace(current: ConnectSession | undefined, next: ConnectSession): boolean {
+  if (current?.uid !== next.uid) return false;
+  WKSDK.shared().config.token = next.token;
+  return true;
+}
+
 export function configureSDK(session: ConnectSession): WKSDK {
   const sdk = WKSDK.shared();
   const config = sdk.config;

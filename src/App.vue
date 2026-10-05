@@ -61,7 +61,7 @@ import { profileActions, profileParams, useAccountPopover, type ProfileTarget } 
 import { getLocale } from "./i18n";
 import EmptyPaths from "./components/EmptyPaths.vue";
 import SystemLine from "./components/SystemLine.vue";
-import { configureSDK, loadMoreConversations, markRead } from "./im";
+import { configureSDK, loadMoreConversations, markRead, renewInPlace } from "./im";
 import { carryPersisted, earlierCursor, mergeMessages, messageKey, remintGuard } from "./history";
 import { listAgents, uncontactedAgents, type DirectoryAgent } from "./agents";
 import { buildOutgoingText } from "./mentions";
@@ -669,7 +669,11 @@ async function adoptShellSession(accessToken: string): Promise<void> {
   loginError.value = "";
   loggingIn.value = true;
   try {
-    startSession(await imSession({ accessToken }));
+    const next = await imSession({ accessToken });
+    // Same user (the routine renewal): swap the stored tokens, keep the socket. remint and the
+    // stream refresh read session.jwt, so they pick up the fresh login token if ever needed.
+    if (renewInPlace(session.value, next)) session.value = next;
+    else startSession(next);
   } catch (error) {
     loginError.value = error instanceof Error ? error.message : t("login.errFailed");
     shellBridge.reportAuthRequired("rejected");
