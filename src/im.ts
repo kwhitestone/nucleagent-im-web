@@ -84,6 +84,9 @@ export function configureSDK(session: ConnectSession): WKSDK {
   config.uid = session.uid;
   config.token = session.token;
   config.addr = session.wsAddr;
+  // The platform's Kong edge closes a WebSocket after 60 s with no frame; the SDK's default
+  // 60 s heartbeat races that cut and loses (the 未连接 flash). 25 s keeps the socket warm.
+  config.heartbeatInterval = 25000;
   config.deviceFlag = 1;
   config.debug = false;
 
