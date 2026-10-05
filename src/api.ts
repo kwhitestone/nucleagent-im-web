@@ -99,6 +99,21 @@ async function request<T>(
   return readEnvelope<T>(response);
 }
 
+/**
+ * The shell re-pushes a renewed login token every ~10 min. If it is the same user, only the
+ * login token changes: no connect-token mint, because im registers every mint with WuKongIM as
+ * the master device and WuKongIM kicks the live socket ~10 s later (the 未连接 flash). The
+ * claim is read unverified only to choose renew-vs-rebuild; im still verifies every use.
+ */
+export function renewsSameUser(current: ConnectSession | undefined, accessToken: string): boolean {
+  try {
+    const payload = accessToken.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    return !!current && String(JSON.parse(atob(payload)).userId) === current.uid;
+  } catch {
+    return false; // unreadable token: rebuild, the pre-fix behaviour
+  }
+}
+
 // Local password, portal SSO and refresh all return the same local login envelope, so
 // the IM handoff is shared: one connect-token exchange bound to that access token.
 export async function imSession(login: LoginData): Promise<ConnectSession> {

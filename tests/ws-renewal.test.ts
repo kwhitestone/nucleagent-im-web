@@ -1,47 +1,35 @@
-// UNI-WS-RENEWAL: the shell re-pushes a renewed login token every ~10 min. Rebuilding the
-// session for it tore the IM socket down (the 10-minute 未连接 flash). Same user → keep the
-// socket; only an actual user change rebuilds.
+// UNI-WS-RENEWAL: the shell re-pushes a renewed login token every ~10 min. Re-adopting it minted a
+// fresh connect token, and im registers every mint with WuKongIM as the master device, so WuKongIM
+// kicked the live socket ~10 s later (the 10-minute 未连接 flash; DEV probe: a bare mint with no
+// client teardown closes the WS at +10.0 s). Same user → swap the login token only, no mint.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import test, { after } from "node:test";
-import { WKSDK } from "wukongimjssdk";
-import { configureSDK, renewInPlace } from "../src/im.ts";
+import test from "node:test";
+import { renewsSameUser, type ConnectSession } from "../src/api.ts";
 
-after(() => clearInterval((WKSDK.shared().receiptManager as unknown as { timer: ReturnType<typeof setInterval> }).timer));
+const jwtFor = (claims: Record<string, unknown>) =>
+  `h.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.s`;
+const live: ConnectSession = { uid: "11", token: "im-1", wsAddr: "ws://im", jwt: jwtFor({ userId: 11, iat: 1 }) };
 
-const live = { uid: "11", token: "im-1", wsAddr: "ws://im", jwt: "login-1" };
-
-function countSocketCalls(run: () => void): number {
-  const sdk = WKSDK.shared();
-  const { connect, disconnect } = sdk;
-  let calls = 0;
-  sdk.connect = () => { calls += 1; };
-  sdk.disconnect = () => { calls += 1; };
-  try { run(); } finally { sdk.connect = connect; sdk.disconnect = disconnect; }
-  return calls;
-}
-
-test("same-user renewal (token changes, uid does not): no reconnect, fresh IM token for the next one", () => {
-  configureSDK(live);
-  let renewed = false;
-  const calls = countSocketCalls(() => {
-    renewed = renewInPlace(live, { ...live, token: "im-2", jwt: "login-2" });
-  });
-  assert.equal(renewed, true);
-  assert.equal(calls, 0);
-  assert.equal(WKSDK.shared().config.token, "im-2");
-  assert.equal(WKSDK.shared().config.uid, "11");
+test("same-user renewal (token value changes, userId unchanged) is a renewal", () => {
+  assert.equal(renewsSameUser(live, jwtFor({ userId: 11, iat: 2 })), true);
 });
 
-test("a user change (or no session yet) is not a renewal: the caller rebuilds", () => {
-  configureSDK(live);
-  assert.equal(renewInPlace(live, { ...live, uid: "12", token: "im-x", jwt: "login-x" }), false);
-  assert.equal(renewInPlace(undefined, live), false);
-  assert.equal(WKSDK.shared().config.token, "im-1");
+test("a user change, no session yet, or an unreadable token is not: the caller rebuilds", () => {
+  assert.equal(renewsSameUser(live, jwtFor({ userId: 12, iat: 2 })), false);
+  assert.equal(renewsSameUser(undefined, jwtFor({ userId: 11 })), false);
+  assert.equal(renewsSameUser(live, "opaque"), false);
+  assert.equal(renewsSameUser(live, jwtFor({ sub: "11" })), false);
 });
 
-test("adoptShellSession renews in place first and only rebuilds via startSession otherwise", () => {
+test("adoptShellSession: a same-user renewal swaps the jwt and returns before any connect-token mint", () => {
   const app = readFileSync(new URL("../src/App.vue", import.meta.url), "utf8");
   const adopt = app.slice(app.indexOf("async function adoptShellSession"), app.indexOf("async function restoreSession"));
-  assert.match(adopt, /if \(renewInPlace\(session\.value, next\)\) session\.value = next;\s*else startSession\(next\);/);
+  const renew = adopt.indexOf("renewsSameUser(session.value, accessToken)");
+  assert.ok(renew > 0, "same-user renewal check missing");
+  const branch = adopt.slice(renew, adopt.indexOf("return;", renew));
+  assert.match(branch, /session\.value = \{ \.\.\.session\.value, jwt: accessToken \};/);
+  assert.doesNotMatch(branch, /imSession|startSession|connect\(|disconnect\(/);
+  assert.ok(renew < adopt.indexOf("imSession("), "the renewal must short-circuit before the mint");
+  assert.match(adopt.slice(renew), /startSession\(await imSession\(\{ accessToken \}\)\)/, "a user change still rebuilds");
 });
