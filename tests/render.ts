@@ -7,6 +7,7 @@
 // surface than the thing under test.
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createSSRApp } from "vue";
 import { renderToString } from "vue/server-renderer";
 import { parse, compileScript, compileTemplate } from "vue/compiler-sfc";
@@ -32,6 +33,10 @@ let seq = 0;
  * for it breaks on the first annotation shape nobody predicted.
  */
 export async function loadComponent(path: string): Promise<unknown> {
+  return (await import(await compileComponent(path))).default;
+}
+
+async function compileComponent(path: string): Promise<string> {
   const source = readFileSync(path, "utf8");
   const { descriptor } = parse(source, { filename: path });
   // inlineTemplate is deliberately off: with it, setup() returns the render
@@ -47,7 +52,11 @@ export async function loadComponent(path: string): Promise<unknown> {
   // Relative imports inside the component resolve against its own directory,
   // not the scratch directory the compiled copy lives in.
   const base = new URL(path, `file://${process.cwd()}/`);
-  const code = rewriteImports(script.content, base).replace(
+  let imports = rewriteImports(script.content, base);
+  for (const match of imports.matchAll(/from "(file:[^"]+\.vue)"/g)) {
+    imports = imports.replace(match[0], `from "${await compileComponent(fileURLToPath(match[1]))}"`);
+  }
+  const code = imports.replace(
     /export default /,
     "const _sfc_main = ",
   );
@@ -58,7 +67,7 @@ export async function loadComponent(path: string): Promise<unknown> {
       + "const __c = _sfc_main;\n__c.render = render;\nexport default __c;\n",
     "utf8",
   );
-  return (await import(`file://${file}`)).default;
+  return `file://${file}`;
 }
 
 /** Renders a component to HTML with a real i18n instance installed. */

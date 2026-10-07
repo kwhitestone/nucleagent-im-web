@@ -1698,6 +1698,7 @@ onBeforeUnmount(() => {
       v-if="groupDialogOpen"
       :session="session"
       :group="dialogGroup"
+      :directory-agents="directoryAgents"
       :preselect="groupPreselect"
       @close="groupDialogOpen = false"
       @profile="openProfile"

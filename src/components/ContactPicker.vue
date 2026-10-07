@@ -12,7 +12,7 @@ import {
   type DirectoryEntry,
 } from "../api";
 import { ensureNames, handleFor, isEnterprise, nameFor } from "../names";
-import { matchAgents, type DirectoryAgent } from "../agents";
+import { matchAgents, uncontactedAgents, type DirectoryAgent } from "../agents";
 import type { ProfileTarget } from "../accountPopover";
 
 const { t } = useI18n();
@@ -86,14 +86,28 @@ watch(query, (value) => {
 // Agents match on name or description (contains, not prefix): users remember
 // what an agent does more often than its exact name. Shown once, so the same
 // uid is dropped from the people rows below.
-const agentMatches = computed(() => matchAgents(props.agents, query.value, (uid) => nameFor(uid)));
+const agentMatches = computed(() => {
+  const available = props.agents.filter((agent) =>
+    !props.excludeUids.includes(agent.uid) && !props.modelValue.some((item) => item.id === agent.uid));
+  return props.multiple && !query.value.trim()
+    ? uncontactedAgents(available, [])
+    : matchAgents(available, query.value, (uid) => nameFor(uid));
+});
 const peopleResults = computed(() => {
   const agentUids = new Set(agentMatches.value.map((agent) => agent.uid));
   return results.value.filter((item) => !agentUids.has(item.id));
 });
 
 function chooseAgent(agent: DirectoryAgent): void {
-  emit("agent", agent);
+  if (props.excludeUids.includes(agent.uid) || props.modelValue.some((item) => item.id === agent.uid)) return;
+  if (props.multiple) {
+    emit("update:modelValue", [...props.modelValue, {
+      id: agent.uid, username: agent.name,
+      displayName: nameFor(String(agent.uid)) || agent.name, accountType: "agent",
+    }]);
+  } else {
+    emit("agent", agent);
+  }
   query.value = "";
   results.value = [];
   open.value = false;
@@ -277,7 +291,7 @@ onBeforeUnmount(() => {
         {{ rowName(contact) }} <span aria-hidden="true">×</span>
       </button>
     </div>
-    <!-- Agents first (UNI-IM-REDESIGN). Browsing means an empty query, so never both. -->
+    <!-- Group selection also lists available agents before a query is entered. -->
     <div v-if="agentMatches.length" class="contact-results" role="listbox" data-testid="im-search-agents">
       <p class="picker-section">{{ t("search.agentsSection") }}</p>
       <div v-for="agent in agentMatches" :key="agent.uid" class="contact-row">

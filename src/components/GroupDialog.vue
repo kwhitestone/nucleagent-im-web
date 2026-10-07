@@ -16,12 +16,14 @@ import {
 } from "../api";
 import { useI18n } from "vue-i18n";
 import ContactPicker from "./ContactPicker.vue";
-import { ensureNames, handleFor, nameFor } from "../names";
+import { avatarFor, ensureNames, handleFor, nameFor } from "../names";
+import type { DirectoryAgent } from "../agents";
 import type { ProfileTarget } from "../accountPopover";
 
 const props = defineProps<{
   session: ConnectSession;
   group?: IMGroup;
+  directoryAgents?: DirectoryAgent[];
   /** Create mode: people already picked (the profile card's "Add to group"). */
   preselect?: Contact[];
 }>();
@@ -251,6 +253,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", closeOnEscape));
         <ContactPicker
           v-model="selected"
           :session="session"
+          :agents="directoryAgents"
           multiple
           :label="t('group.members')"
           :placeholder="t('group.searchMembers')"
@@ -271,7 +274,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", closeOnEscape));
             <h3>{{ t("group.members") }}</h3>
             <div class="member-list">
               <div v-for="member in members" :key="member.uid" class="member-row">
-                <span>
+                <div class="member-identity">
                   <button
                     class="member-name"
                     type="button"
@@ -279,14 +282,19 @@ onBeforeUnmount(() => window.removeEventListener("keydown", closeOnEscape));
                     :aria-label="t('profile.view', { name: memberName(member) })"
                     @click="inspect(member, $event.currentTarget as HTMLElement)"
                   >
-                    {{ memberName(member) }}
+                    <span class="avatar member-avatar" :class="{ bot: member.accountType === 'agent' }">
+                      <img v-if="avatarFor(String(member.uid), member.avatar)" :src="avatarFor(String(member.uid), member.avatar)" alt="" referrerpolicy="no-referrer">
+                      <template v-else>{{ [...memberName(member)][0]?.toUpperCase() }}</template>
+                    </span>
+                    <span class="member-label">{{ memberName(member) }}</span>
                   </button>
+                  <span v-if="member.accountType === 'agent'" class="tag agent" data-testid="im-member-agent-badge">{{ t("badge.agent") }}</span>
                   <small>
-                    {{ member.accountType === "agent" ? t("badge.agent")
+                    {{ member.accountType === "agent" ? ""
                       : handleFor(String(member.uid), member.username) ? `@${handleFor(String(member.uid), member.username)}` : t("badge.person") }}
                     <template v-if="member.uid === group.creatorUid">· {{ t("group.owner") }}</template>
                   </small>
-                </span>
+                </div>
                 <button
                   v-if="isOwner && member.uid !== group.creatorUid"
                   class="quiet danger-text"
@@ -305,6 +313,7 @@ onBeforeUnmount(() => window.removeEventListener("keydown", closeOnEscape));
             <ContactPicker
               v-model="selected"
               :session="session"
+              :agents="directoryAgents"
               multiple
               :placeholder="t('group.searchMembers')"
               :exclude-uids="members.map((member) => member.uid)"
