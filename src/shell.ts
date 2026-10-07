@@ -13,6 +13,7 @@
 // bounded token, `source === "shell"`. The credential stays in memory.
 import { createRemoteChildChannel } from "./vendor/prism-fusion-plugin-runtime/remote-channel.ts";
 import { outerAware } from "./outerHost.ts";
+import { parseConversationTarget, type ConversationTarget } from "./conversationTarget.ts";
 
 const shellOrigin = outerAware(import.meta.env?.VITE_SHELL_URL || "http://localhost:26600");
 
@@ -80,6 +81,7 @@ export interface ShellBridge {
 export interface ShellBridgeOptions {
   /** Called for every accepted intent; a null token means "signed out". */
   onAuth(intent: ShellAuthIntent): void;
+  onConversation?(target: ConversationTarget): void;
 }
 
 /** No-op outside a shell frame so standalone im-web is untouched. */
@@ -90,20 +92,29 @@ export function installShellBridge(options: ShellBridgeOptions): ShellBridge {
   }
 
   let lastVersion = 0;
+  let authenticated = false;
   const channel = createRemoteChildChannel({
     appId: "im",
     hostOrigin: new URL(shellOrigin).origin,
     allowedHostOrigins: import.meta.env?.VITE_SHELL_ALLOWED_ORIGINS,
     parent: window.parent,
     messages: {
-      toChild: ["auth"],
+      toChild: ["auth", "conversation"],
       fromChild: ["auth-required", "login-request", "account-request", "logout-request"],
     },
     onMessage(type, payload) {
+      if (type === "conversation") {
+        const value = payload as { source?: unknown; type?: unknown; sessionVersion?: unknown; target?: unknown } | null;
+        if (!authenticated || !value || value.source !== "shell" || value.type !== type || value.sessionVersion !== lastVersion) return;
+        const target = parseConversationTarget(value.target);
+        if (target) options.onConversation?.(target);
+        return;
+      }
       if (type !== "auth") return;
       const intent = parseShellAuth(payload, lastVersion);
       if (!intent) return;
       lastVersion = intent.sessionVersion;
+      authenticated = intent.token !== null;
       options.onAuth(intent);
     },
   });

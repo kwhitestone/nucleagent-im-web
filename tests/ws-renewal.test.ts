@@ -31,5 +31,6 @@ test("adoptShellSession: a same-user renewal swaps the jwt and returns before an
   assert.match(branch, /session\.value = \{ \.\.\.session\.value, jwt: accessToken \};/);
   assert.doesNotMatch(branch, /imSession|startSession|connect\(|disconnect\(/);
   assert.ok(renew < adopt.indexOf("imSession("), "the renewal must short-circuit before the mint");
-  assert.match(adopt.slice(renew), /startSession\(await imSession\(\{ accessToken \}\)\)/, "a user change still rebuilds");
+  assert.match(adopt.slice(renew), /await imSession\(\{ accessToken \}\)/, "a user change still mints");
+  assert.match(adopt.slice(renew), /if \(generation !== shellAuthGeneration\) return;\s+startSession\(nextSession\)/, "only the current session may rebuild");
 });

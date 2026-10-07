@@ -48,6 +48,7 @@ import {
   startPortalLogin,
 } from "./portal";
 import { installShellBridge, isInShell, shellAccountUrl } from "./shell";
+import { resolveConversationTarget, type ConversationTarget } from "./conversationTarget";
 import {
   clearCachedProfile,
   fetchProfile,
@@ -115,6 +116,14 @@ const restoring = ref(!embedded && !isCallbackPath(window.location));
 const dialOpen = ref(false);
 const dialOpenId = ref("");
 const activeChannel = ref<Channel>();
+let pendingConversationTarget: ConversationTarget | null = null;
+
+function openPendingConversation(): void {
+  if (!pendingConversationTarget || !session.value || connection.value !== "connected") return;
+  const target = resolveConversationTarget(pendingConversationTarget, String(session.value.uid));
+  pendingConversationTarget = null;
+  if (target) void openChannel(new Channel(target.channelID, target.channelType));
+}
 const activeGroupMembers = ref<GroupMember[]>([]);
 const messages = shallowRef<Message[]>([]);
 const liveResponses = ref<LiveAgentResponse[]>([]);
@@ -460,6 +469,7 @@ const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
     connection.value = "connected";
     remint.reset();
     void Promise.all([syncConversations(), syncGroups(), refreshActiveHistory()]);
+    openPendingConversation();
   } else if (status === ConnectStatus.Connecting) {
     connection.value = "connecting";
   } else if (status === ConnectStatus.ConnectFail && reasonCode === 2) {
@@ -634,9 +644,17 @@ async function resumePortalLogin(): Promise<void> {
 // Shell mode: the shell pushes the access token over the validated channel and
 // im-web converges on the same connect-token exchange local login uses. Nothing
 // else about the app changes, and standalone mode never reaches this bridge.
+let shellAuthGeneration = 0;
 const shellBridge = installShellBridge({
+  onConversation(target) {
+    pendingConversationTarget = target;
+    openPendingConversation();
+  },
   onAuth(intent) {
+    shellAuthGeneration += 1;
     if (!intent.token) {
+      pendingConversationTarget = null;
+      loggingIn.value = false;
       // Shell signed out (or bumped the version with no token): drop local state
       // without revoking anything ourselves — the shell owns the refresh family.
       // This is an intentional sign-out, so the per-account name cache goes too.
@@ -666,6 +684,7 @@ function signInViaShell(): void {
 if (embedded) signInViaShell();
 
 async function adoptShellSession(accessToken: string): Promise<void> {
+  const generation = shellAuthGeneration;
   if (session.value?.jwt === accessToken) return;
   // Same user (the routine renewal): swap the login token, keep the socket and its IM token.
   // If WuKongIM ever rejects that token, remintConnectToken mints from this fresh session.jwt.
@@ -673,15 +692,21 @@ async function adoptShellSession(accessToken: string): Promise<void> {
     session.value = { ...session.value, jwt: accessToken };
     return;
   }
+  pendingConversationTarget = null;
+  if (session.value) teardownSession();
   loginError.value = "";
   loggingIn.value = true;
   try {
-    startSession(await imSession({ accessToken }));
+    const nextSession = await imSession({ accessToken });
+    if (generation !== shellAuthGeneration) return;
+    startSession(nextSession);
   } catch (error) {
+    if (generation !== shellAuthGeneration) return;
+    pendingConversationTarget = null;
     loginError.value = error instanceof Error ? error.message : t("login.errFailed");
     shellBridge.reportAuthRequired("rejected");
   } finally {
-    loggingIn.value = false;
+    if (generation === shellAuthGeneration) loggingIn.value = false;
   }
 }
 

@@ -186,3 +186,38 @@ test("standalone, the account action goes to the shell's /account and back to /i
   assert.equal(url.pathname, "/account");
   assert.equal(url.searchParams.get("redirect"), "/im");
 });
+
+test("conversation targets require the authenticated session and validated channel", () => {
+  withFramedWindow((frame) => {
+    const received: unknown[] = [];
+    const bridge = installShellBridge({ onAuth() {}, onConversation: (target) => received.push(target) });
+    const target = { channelId: "11@17", channelType: 1, agentUid: "17" };
+    const send = (type: string, payload: unknown, envelope = {}, event = {}) => frame.deliver({
+      source: frame.parent, origin: shellOrigin, data: hostEnvelope(type, payload, envelope), ...event,
+    });
+    const intent = (sessionVersion: number, overrides = {}) => ({
+      source: "shell", type: "conversation", sessionVersion, target, ...overrides,
+    });
+    send("host:init", undefined);
+    send("conversation", intent(0));
+    assert.deepEqual(received, []);
+    send("auth", authPayload());
+    for (const event of [{ origin: "https://evil.example" }, { source: {} }]) {
+      send("conversation", intent(1), {}, event);
+    }
+    for (const envelope of [{ appId: "core" }, { instanceId: "fedcba9876543210-1111" }, { version: 2 }]) {
+      send("conversation", intent(1), envelope);
+    }
+    send("conversation", intent(0));
+    send("conversation", intent(2));
+    send("conversation", intent(1, { source: "sub" }));
+    send("conversation", intent(1, { target: { ...target, channelId: "17@11" } }));
+    assert.deepEqual(received, []);
+    send("conversation", intent(1));
+    assert.deepEqual(received, [target]);
+    send("auth", authPayload({ token: null }));
+    send("conversation", intent(1));
+    assert.deepEqual(received, [target]);
+    bridge.dispose();
+  });
+});
