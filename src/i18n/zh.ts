@@ -124,6 +124,7 @@ export default {
     unsupported: "[暂不支持的消息类型]",
     you: "你",
     errHistory: "消息历史加载失败",
+    targetUnavailable: "无法打开这个 IM 会话：它可能已解散，或你不是成员。",
     errConversations: "会话列表同步失败",
     errGroups: "群列表加载失败",
   },

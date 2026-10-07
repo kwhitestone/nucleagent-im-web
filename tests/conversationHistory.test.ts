@@ -32,6 +32,12 @@ function harness() {
     historyFinished: { value: false }, loadingHistory: { value: false },
     loginError: { value: "" }, loggingIn: { value: false }, groups: { value: [] },
     viewGeneration: 0, ChannelTypeGroup: 2,
+    t: (key: string) => key,
+    memberGroups: [{ wukongChannelId: "group-4" }] as Array<{ wukongChannelId: string }> | Error,
+    listGroups: async () => {
+      if (state.memberGroups instanceof Error) throw state.memberGroups;
+      return state.memberGroups;
+    },
     Channel: class {
       channelID: string;
       channelType: number;
@@ -104,13 +110,37 @@ test("connected group target opens that group and replaces its history", async (
   assert.deepEqual(h.state.messages.value, h.history);
 });
 
-test("a DM for another viewer never requests history", async () => {
+test("a DM for another viewer never requests history and says why (T17)", async () => {
   const h = harness();
   h.state.session.value = { uid: "2" };
   h.connected();
   h.intents.onConversation(dm);
   await flush();
   assert.deepEqual(h.requests, []);
+  assert.equal(h.state.loginError.value, "chat.targetUnavailable");
+});
+
+test("a group the viewer is not in (or that is gone) shows a notice, not a blank pane (T17)", async () => {
+  const h = harness();
+  h.state.session.value = { uid: "1" };
+  h.state.memberGroups = [{ wukongChannelId: "group-other" }];
+  h.connected();
+  h.intents.onConversation({ channelId: "group-4", channelType: 2, agentUid: "17" });
+  await flush();
+  assert.deepEqual(h.requests, []);
+  assert.equal(h.state.activeChannel.value, undefined);
+  assert.equal(h.state.loginError.value, "chat.targetUnavailable");
+});
+
+test("if the membership check itself fails, the group still opens (T17)", async () => {
+  const h = harness();
+  h.state.session.value = { uid: "1" };
+  h.state.memberGroups = new Error("im down");
+  h.connected();
+  h.intents.onConversation({ channelId: "group-4", channelType: 2, agentUid: "17" });
+  await flush();
+  assert.deepEqual(h.requests, [{ channelID: "group-4", channelType: 2 }]);
+  assert.equal(h.state.loginError.value, "");
 });
 
 test("signout invalidates a pending login and its conversation target", async () => {

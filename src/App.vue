@@ -118,11 +118,32 @@ const dialOpenId = ref("");
 const activeChannel = ref<Channel>();
 let pendingConversationTarget: ConversationTarget | null = null;
 
-function openPendingConversation(): void {
+// UNI-T17: a deep link (e.g. from the library) to a DM the viewer is not in, or a
+// group that is gone or that the viewer is not a member of, says so instead of
+// leaving a blank pane. listGroups only returns the caller's groups; it is fetched
+// fresh because syncGroups may not have landed yet. If that fetch fails, open
+// anyway (history then reports its own error).
+async function openPendingConversation(): Promise<void> {
   if (!pendingConversationTarget || !session.value || connection.value !== "connected") return;
-  const target = resolveConversationTarget(pendingConversationTarget, String(session.value.uid));
+  const targetSession = session.value;
+  const target = resolveConversationTarget(pendingConversationTarget, String(targetSession.uid));
   pendingConversationTarget = null;
-  if (target) void openChannel(new Channel(target.channelID, target.channelType));
+  if (!target) {
+    loginError.value = t("chat.targetUnavailable");
+    return;
+  }
+  if (target.channelType === ChannelTypeGroup) {
+    const member = await listGroups(targetSession).then(
+      (list) => list.some((group) => group.wukongChannelId === target.channelID),
+      () => true,
+    );
+    if (session.value !== targetSession) return;
+    if (!member) {
+      loginError.value = t("chat.targetUnavailable");
+      return;
+    }
+  }
+  void openChannel(new Channel(target.channelID, target.channelType));
 }
 const activeGroupMembers = ref<GroupMember[]>([]);
 const messages = shallowRef<Message[]>([]);
@@ -469,7 +490,7 @@ const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
     connection.value = "connected";
     remint.reset();
     void Promise.all([syncConversations(), syncGroups(), refreshActiveHistory()]);
-    openPendingConversation();
+    void openPendingConversation();
   } else if (status === ConnectStatus.Connecting) {
     connection.value = "connecting";
   } else if (status === ConnectStatus.ConnectFail && reasonCode === 2) {
@@ -648,7 +669,7 @@ let shellAuthGeneration = 0;
 const shellBridge = installShellBridge({
   onConversation(target) {
     pendingConversationTarget = target;
-    openPendingConversation();
+    void openPendingConversation();
   },
   onAuth(intent) {
     shellAuthGeneration += 1;
