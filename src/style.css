@@ -1497,8 +1497,34 @@ kbd {
   justify-content: space-between;
 }
 
-.member-row > span {
-  display: grid;
+.member-identity {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.member-identity .member-name {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.member-label {
+  overflow-wrap: anywhere;
+}
+
+.member-avatar {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+}
+
+.member-row > button {
+  flex: none;
 }
 
 .member-row small,
