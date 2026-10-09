@@ -681,6 +681,18 @@ textarea:focus {
   place-items: center;
 }
 
+/* IM1: an avatar image fills its shape (round on phones, rounded square on
+ * desktop, in light and dark alike) and is cropped, never stretched. */
+.avatar {
+  overflow: hidden;
+}
+
+.avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .avatar.group {
   background: linear-gradient(135deg, var(--indigo-500), var(--violet-500));
 }

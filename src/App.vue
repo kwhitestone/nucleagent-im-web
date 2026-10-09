@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, reactive, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import {
   Channel,
@@ -55,9 +55,10 @@ import {
   loadCachedProfile,
   saveCachedProfile,
 } from "./profile";
-import { accountTypeOf, avatarFor, ensureNames, handleFor, isEnterprise, isMissing, nameFor, openIdOf, resetNames } from "./names";
+import { accountTypeOf, avatarFailed, avatarSrc, ensureNames, handleFor, isEnterprise, isMissing, nameFor, openIdOf, resetNames } from "./names";
 import ContactPicker from "./components/ContactPicker.vue";
 import GroupDialog from "./components/GroupDialog.vue";
+import RowAvatar from "./components/RowAvatar.vue";
 import IdentityCard from "./components/IdentityCard.vue";
 import { profileActions, profileParams, useAccountPopover, type ProfileTarget } from "./accountPopover";
 import { getLocale } from "./i18n";
@@ -329,9 +330,9 @@ function isAgentConversation(conversation: Conversation): boolean {
     && isAgentUid(conversation.channel.channelID);
 }
 
-function conversationInitial(conversation: Conversation): string {
-  if (conversation.channel.channelType === ChannelTypeGroup) return "#";
-  return [...conversationTitle(conversation)][0]?.toUpperCase() || "";
+function conversationKind(conversation: Conversation): "person" | "agent" | "group" {
+  if (conversation.channel.channelType === ChannelTypeGroup) return "group";
+  return isAgentConversation(conversation) ? "agent" : "person";
 }
 
 function conversationTime(conversation: Conversation): string {
@@ -420,15 +421,13 @@ function agentName(uid: string): string {
   return personName(uid) || t("badge.agent");
 }
 
-// A uid whose avatar URL failed to load (404, CORS, ...) falls back to the
-// initial for the rest of the session; shared across every message from them.
-const avatarLoadFailed = reactive(new Set<string>());
-
-/** The message sender's avatar: resolved, else the group member row's; "" = initials (UNI-IM-AVATARS). */
+/**
+ * The message sender's avatar: resolved, else the group member row's; "" = initials (UNI-IM-AVATARS).
+ * A failed image is shared with the conversation rows (names.ts avatarFailed, IM1).
+ */
 function messageAvatar(message: Message): string {
-  if (avatarLoadFailed.has(message.fromUID)) return "";
   const member = activeGroupMembers.value.find((item) => String(item.uid) === message.fromUID);
-  return avatarFor(message.fromUID, member?.avatar);
+  return avatarSrc(message.fromUID, member?.avatar);
 }
 
 function isAgentMessage(message: Message): boolean {
@@ -1440,14 +1439,12 @@ onBeforeUnmount(() => {
           type="button"
           @click="openChannel(conversation.channel)"
         >
-          <span
-            class="avatar"
-            :class="{
-              group: conversation.channel.channelType === ChannelTypeGroup,
-              bot: isAgentConversation(conversation),
-              unnamed: isResolving(conversation),
-            }"
-          >{{ conversationInitial(conversation) }}</span>
+          <RowAvatar
+            :id="conversation.channel.channelID"
+            :name="conversationTitle(conversation)"
+            :kind="conversationKind(conversation)"
+            :unnamed="isResolving(conversation)"
+          />
           <span class="conversation-copy">
             <span class="conversation-name">
               <!-- nickName is mandatory: while it resolves, a skeleton — never the UID. -->
@@ -1480,7 +1477,7 @@ onBeforeUnmount(() => {
           type="button"
           @click="openGroup(group)"
         >
-          <span class="avatar group">#</span>
+          <RowAvatar :id="group.wukongChannelId" :name="group.title" kind="group" />
           <span class="conversation-copy">
             <span class="conversation-name"><strong>{{ group.title }}</strong></span>
             <small>{{ t("empty.noMessages") }}</small>
@@ -1502,7 +1499,7 @@ onBeforeUnmount(() => {
             type="button"
             @click="openAgent(agent)"
           >
-            <span class="avatar bot">{{ [...agentRowName(agent)][0]?.toUpperCase() }}</span>
+            <RowAvatar :id="String(agent.uid)" :name="agentRowName(agent)" kind="agent" />
             <span class="conversation-copy">
               <span class="conversation-name">
                 <strong>{{ agentRowName(agent) }}</strong>
@@ -1605,7 +1602,7 @@ onBeforeUnmount(() => {
             <!-- Message avatar (UNI-IM-AVATARS): resolve data's avatar image,
                  else the same initial-letter placeholder every other avatar uses. -->
             <span class="avatar message-avatar" data-testid="im-message-avatar">
-              <img v-if="messageAvatar(message)" :src="messageAvatar(message)" alt="" referrerpolicy="no-referrer" @error="avatarLoadFailed.add(message.fromUID)">
+              <img v-if="messageAvatar(message)" :src="messageAvatar(message)" alt="" referrerpolicy="no-referrer" @error="avatarFailed(message.fromUID, messageAvatar(message))">
               <template v-else>{{ (isOwnMessage(message) ? t("chat.you") : personName(message.fromUID))[0]?.toUpperCase() }}</template>
             </span>
             <span class="message-copy">

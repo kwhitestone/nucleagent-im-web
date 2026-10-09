@@ -50,6 +50,45 @@ export function avatarFor(uid: string, stored?: string): string {
   return (resolved || stored || "").trim();
 }
 
+/** auth's safeAvatar rule (userdirectory/resolve.go): https only, ≤2048 chars, no quotes, brackets or spaces. */
+function isSafeAvatar(url: string): boolean {
+  return url.startsWith("https://") && url.length <= 2048 && !/[\s"'<>]/.test(url);
+}
+
+// IM1 (Q3 A2/A4): uid → the avatar URL whose <img> failed. An <img> error
+// carries no status, so any first failure may be an expired signed link: the
+// row shows the initial at once, and the uid is re-resolved once (batched with
+// every other failure in the window), after which whatever URL it has is drawn
+// again. A second image failure stays on the initial for the session — unless
+// resolve later hands out a different URL.
+const brokenSrc = reactive(new Map<string, string>());
+const recheck = new Set<string>();
+const rechecked = new Set<string>();
+let recheckTimer: ReturnType<typeof setTimeout> | undefined;
+let lastSession: ConnectSession | undefined;
+export const avatarRetryMs = 300;
+
+/** The avatar to draw: resolved else stored, https only, never the URL that already failed; "" = initial. */
+export function avatarSrc(uid: string, stored?: string): string {
+  const src = avatarFor(uid, stored);
+  return isSafeAvatar(src) && brokenSrc.get(uid) !== src ? src : "";
+}
+
+/** An avatar <img> @error: fall back to the initial, and re-resolve the uid once in case the link expired. */
+export function avatarFailed(uid: string, src = avatarFor(uid)): void {
+  brokenSrc.set(uid, src);
+  if (rechecked.has(uid) || !lastSession) return;
+  rechecked.add(uid);
+  recheck.add(uid);
+  recheckTimer ??= setTimeout(() => {
+    recheckTimer = undefined;
+    const uids = [...recheck];
+    recheck.clear();
+    if (!lastSession) return;
+    void ensureNames(uids, lastSession, true).then(() => uids.forEach((uid) => brokenSrc.delete(uid)));
+  }, avatarRetryMs);
+}
+
 /** Enterprise (portal-linked) per resolve; undefined when not known (older auth, not resolved yet). */
 export function isEnterprise(uid: string): boolean | undefined {
   return known.get(uid)?.enterprise ?? undefined;
@@ -73,20 +112,29 @@ export function resetNames(): void {
   owner = "";
   clearTimeout(retry);
   retry = undefined;
+  brokenSrc.clear();
+  recheck.clear();
+  rechecked.clear();
+  clearTimeout(recheckTimer);
+  recheckTimer = undefined;
+  lastSession = undefined;
 }
 
 /**
  * Resolves every uid not already known or in flight, in one batched call.
  * Never throws: a failure leaves the names unresolved (skeleton) and retries
  * once per retryMs until it lands. A directory switched off (404) does not retry.
+ * `refresh` asks again for uids already known (the avatar recheck); their
+ * current profile stays until the new one lands.
  */
-export async function ensureNames(uids: Iterable<string>, session: ConnectSession): Promise<void> {
+export async function ensureNames(uids: Iterable<string>, session: ConnectSession, refresh = false): Promise<void> {
   if (owner !== session.uid) {
     resetNames();
     owner = session.uid;
   }
+  lastSession = session;
   const want = [...new Set(uids)].filter(
-    (uid) => /^[1-9]\d*$/.test(uid) && !known.has(uid) && !pending.has(uid),
+    (uid) => /^[1-9]\d*$/.test(uid) && (refresh || !known.has(uid)) && !pending.has(uid),
   );
   if (!want.length) return;
   want.forEach((uid) => pending.add(uid));

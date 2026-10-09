@@ -189,9 +189,9 @@ test("avatar trigger CSS: sits over the avatar cell, 36px desktop / 48px phone, 
 test("message row: an avatar sits next to the sender, image when resolved, initials otherwise", () => {
   const block = app.slice(app.indexOf('v-for="message in messages"'), app.indexOf("</article>"));
   assert.match(block, /class="avatar message-avatar" data-testid="im-message-avatar"/);
-  assert.match(block, /<img v-if="messageAvatar\(message\)" :src="messageAvatar\(message\)" alt="" referrerpolicy="no-referrer" @error="avatarLoadFailed\.add\(message\.fromUID\)">/);
+  assert.match(block, /<img v-if="messageAvatar\(message\)" :src="messageAvatar\(message\)" alt="" referrerpolicy="no-referrer" @error="avatarFailed\(message\.fromUID, messageAvatar\(message\)\)">/);
   assert.match(block, /<template v-else>\{\{ \(isOwnMessage\(message\) \? t\("chat\.you"\) : personName\(message\.fromUID\)\)\[0\]\?\.toUpperCase\(\) \}\}<\/template>/);
-  assert.match(app, /function messageAvatar\(message: Message\): string \{[\s\S]*?avatarFor\(message\.fromUID, member\?\.avatar\)/);
+  assert.match(app, /function messageAvatar\(message: Message\): string \{[\s\S]*?avatarSrc\(message\.fromUID, member\?\.avatar\)/);
 });
 
 test("message avatar CSS: a small avatar next to the bubble, image fills the circle", () => {
