@@ -171,7 +171,7 @@ test("S5: one character never calls im search; it shows the rule and local title
 });
 
 test("S7/U2: loading skeleton, empty state with the rules, error state with retry", () => {
-  assert.match(panelSource, /data-testid="im-search-skeleton"/);
+  assert.match(panelSource, /<div v-if="loading" class="search-skeleton" data-testid="im-search-skeleton"/, "skeleton while remote groups load, even under instant local hits");
   assert.match(panelSource, /data-testid="im-search-empty"[\s\S]*?t\("search\.emptyRules"\)/);
   assert.match(panelSource, /data-testid="im-search-error"[\s\S]*?@click="retry"/);
 });
@@ -194,6 +194,7 @@ test("U1: Ctrl/⌘+K and / open the panel (not while typing); the rail search bu
   assert.match(keys, /\(event\.ctrlKey \|\| event\.metaKey\) && event\.key\.toLowerCase\(\) === "k"/);
   assert.match(keys, /event\.key === "\/" && !typing/);
   assert.match(app, /function focusSearch\(\): void \{[\s\S]*?searchOpen\.value = true/);
+  assert.match(app, /class="app-shell" :class="\{ 'show-chat': activeChannel && !searchOpen \}"/, "phones: an open chat must not cover the search page");
   assert.match(app, /<SearchPanel[\s\S]*?v-if="searchOpen"/);
 });
 

@@ -367,7 +367,8 @@ defineExpose({ focus: () => input.value?.focus() });
           </div>
         </section>
 
-        <div v-if="loading && !hasResults" class="search-skeleton" data-testid="im-search-skeleton" aria-busy="true">
+        <!-- Local title hits show at once; the skeleton stands for the remote groups still loading. -->
+        <div v-if="loading" class="search-skeleton" data-testid="im-search-skeleton" aria-busy="true">
           <span v-for="n in 4" :key="n" class="skeleton-row"><i /><b /></span>
         </div>
         <div v-else-if="!loading && !error && !hasResults" class="search-status" data-testid="im-search-empty">

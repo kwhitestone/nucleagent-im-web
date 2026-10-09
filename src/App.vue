@@ -1461,7 +1461,8 @@ onBeforeUnmount(() => {
   <!-- Variant B: 72px icon rail + conversation list + chat. This is the shell's
        own AppSidebar anatomy (brand / nav / list / user slot) split across two
        columns, so the mental model carries over between them. -->
-  <main v-else class="app-shell" :class="{ 'show-chat': activeChannel }">
+  <!-- Phones: the open chat covers the sidebar, except while the search page (which lives there) is open. -->
+  <main v-else class="app-shell" :class="{ 'show-chat': activeChannel && !searchOpen }">
     <nav class="rail" :aria-label="t('app.title')">
       <span class="rail-brand" :title="t('app.title')">N</span>
 
