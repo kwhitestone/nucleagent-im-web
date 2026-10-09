@@ -1,5 +1,10 @@
 import { recipientEnabled, type ConnectSession } from "./api.ts";
 
+/** Composer hint for a refused DM: an agent account is disabled only when its definition is deleted. */
+export function recipientDisabledKey(isAgent: boolean): string {
+  return isAgent ? "composer.agentDeleted" : "composer.recipientDisabled";
+}
+
 // This protects our client, not arbitrary SDK clients. A transport-wide veto
 // would require a verified WuKong pre-send hook, not msg.notify.
 export async function sendToEnabledRecipient(

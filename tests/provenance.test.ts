@@ -71,3 +71,12 @@ test("the stream carries the failure code so the UI can name the guard that fire
   assert.equal(responses[0].code, "a2a_depth_exceeded");
   assert.match(rejectionCopy(responses[0].code!), /depth limit/);
 });
+
+test("AG1-B2: a deleted agent's IM refusal names the deletion, in zh and en", () => {
+  assert.equal(rejectionCopy("im_recipient_disabled", "zh"), "智能体已删除");
+  assert.equal(rejectionCopy("im_recipient_disabled", "en"), "This agent has been deleted.");
+  assert.equal(rejectionCopy("im_recipient_disabled"), "This agent has been deleted.");
+  // Untouched codes keep their copy in either locale.
+  assert.match(rejectionCopy("a2a_depth_exceeded", "zh"), /depth limit|深度/);
+  assert.equal(rejectionCopy("im_execution_failed", "en"), "The agent could not complete this request.");
+});

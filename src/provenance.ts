@@ -40,6 +40,15 @@ export function isAgentRelayed(provenance: Provenance | null): boolean {
   return Boolean(provenance && provenance.depth > 1 && provenance.viaUid);
 }
 
-export function rejectionCopy(code: string): string {
-  return a2aRejectionCopy[code] || "The agent could not complete this request.";
+/**
+ * Refusals that name an agent state, per locale. im_recipient_disabled is what IM
+ * answers for an agent whose account is disabled, and an agent account is only
+ * disabled when an admin deletes its definition (AG1-B2).
+ */
+export const agentStateCopy: Record<string, { zh: string; en: string }> = {
+  im_recipient_disabled: { zh: "智能体已删除", en: "This agent has been deleted." },
+};
+
+export function rejectionCopy(code: string, locale: "zh" | "en" = "en"): string {
+  return agentStateCopy[code]?.[locale] || a2aRejectionCopy[code] || "The agent could not complete this request.";
 }

@@ -138,6 +138,7 @@ export default {
     removeMention: "取消呼叫 {'@'}{name}",
     errSend: "消息发送失败",
     recipientDisabled: "此账号暂不能接收消息。",
+    agentDeleted: "智能体已删除，不能再接收消息；历史消息仍可查看。",
     label: "消息",
   },
   system: {

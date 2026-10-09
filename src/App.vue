@@ -67,7 +67,7 @@ import { configureSDK, loadMoreConversations, markRead } from "./im";
 import { carryPersisted, earlierCursor, mergeMessages, messageKey, remintGuard } from "./history";
 import { listAgents, uncontactedAgents, type DirectoryAgent } from "./agents";
 import { buildOutgoingText } from "./mentions";
-import { sendToEnabledRecipient } from "./send";
+import { recipientDisabledKey, sendToEnabledRecipient } from "./send";
 import { isAgentRelayed, readProvenance, rejectionCopy } from "./provenance";
 import {
   applyAgentStreamEvent,
@@ -1632,7 +1632,7 @@ onBeforeUnmount(() => {
             <!-- Belongs to this conversation, so it sits in the timeline rather
                  than as a corner toast that covers the composer. -->
             <SystemLine v-if="response.status === 'error'">
-              {{ rejectionCopy(response.code || "") }}
+              {{ rejectionCopy(response.code || "", getLocale()) }}
             </SystemLine>
             <article v-else class="message agent streaming">
               <span class="sender">
@@ -1703,7 +1703,7 @@ onBeforeUnmount(() => {
             {{ t("composer.send") }}
           </button>
           <p v-if="recipientDisabled" class="composer-hint" role="status" data-testid="recipient-disabled">
-            {{ t("composer.recipientDisabled") }}
+            {{ t(recipientDisabledKey(!!activeChannel && isAgentUid(activeChannel.channelID))) }}
           </p>
           <!-- Enter-to-send is a destructive default, so the UI states it. -->
           <p class="composer-hint">

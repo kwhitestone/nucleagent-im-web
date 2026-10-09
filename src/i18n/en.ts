@@ -138,6 +138,7 @@ export default {
     removeMention: "Remove mention {'@'}{name}",
     errSend: "Message send failed",
     recipientDisabled: "This account cannot receive messages.",
+    agentDeleted: "This agent has been deleted and cannot receive messages. Past messages stay readable.",
     label: "Message",
   },
   system: {
