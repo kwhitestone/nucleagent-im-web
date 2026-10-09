@@ -261,6 +261,15 @@ test("entries: row ⋯ button, right-click, 500 ms long-press, chat-header hide,
   assert.match(app, /data-testid="im-undo"/);
 });
 
+test("phones keep the list ⋯ menu: it is not inside a span (.sidebar-header span is hidden ≤720px)", () => {
+  const header = app.slice(app.indexOf('<header class="sidebar-header">'), app.indexOf("</header>", app.indexOf('<header class="sidebar-header">')));
+  const at = header.indexOf('data-testid="im-list-menu"');
+  assert.ok(at > 0);
+  const open = (tag: string) => (header.slice(0, at).match(new RegExp(`<${tag}[\\s>]`, "g")) || []).length - (header.slice(0, at).match(new RegExp(`</${tag}>`, "g")) || []).length;
+  assert.equal(open("span"), 0, "no open <span> around the ⋯ button");
+  assert.match(readFileSync("src/style.css", "utf8"), /@media \(max-width: 720px\)[\s\S]*?\.sidebar-header span \{\s*display: none;/);
+});
+
 test("Esc leaves select mode (and closes an open menu first)", () => {
   const esc = app.slice(app.indexOf("function onKeydown"), app.indexOf("function onKeydown") + 400);
   assert.match(esc, /Escape/);

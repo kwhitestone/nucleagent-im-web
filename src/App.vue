@@ -1497,7 +1497,8 @@ onBeforeUnmount(() => {
         >
           +
         </button>
-        <span class="list-menu-wrap">
+        <!-- A div, not a span: phones hide every .sidebar-header span (the connection words). -->
+        <div class="list-menu-wrap">
           <button
             class="icon-button"
             type="button"
@@ -1508,11 +1509,11 @@ onBeforeUnmount(() => {
             :aria-expanded="listMenuOpen"
             @click="listMenuOpen = !listMenuOpen"
           >⋯</button>
-          <span v-if="listMenuOpen" class="row-menu list-menu" role="menu">
+          <div v-if="listMenuOpen" class="row-menu list-menu" role="menu">
             <button type="button" role="menuitem" data-testid="im-select-start" @click="startSelecting">{{ t("hide.select") }}</button>
             <button type="button" role="menuitem" data-testid="im-hidden-entry" @click="openHiddenView">{{ t("hide.hiddenList", { count: batch.hidden.value.length }) }}</button>
-          </span>
-        </span>
+          </div>
+        </div>
       </header>
 
       <p

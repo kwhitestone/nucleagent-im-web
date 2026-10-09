@@ -1780,6 +1780,10 @@ kbd {
     margin-left: auto;
   }
 
+  .sidebar-header .list-menu-wrap .icon-button {
+    margin-left: 0;
+  }
+
   .conn-dot {
     display: inline-block;
     width: 8px;
