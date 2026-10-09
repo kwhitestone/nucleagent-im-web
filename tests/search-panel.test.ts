@@ -98,6 +98,8 @@ test("ranges are characters, not UTF-16 units; bad ranges are ignored instead of
   assert.deepEqual(markSegments(snippet, [[1, 3]]), [{ text: "😀", hit: false }, { text: "蓝鲸", hit: true }, { text: "ABC", hit: false }]);
   assert.deepEqual(markSegments("abc", [[5, 9], [2, 1]]), [{ text: "abc", hit: false }]);
   assert.deepEqual(markSegments("abcabc", [[0, 1], [3, 4]]).filter((s) => s.hit).map((s) => s.text), ["a", "a"]);
+  const overlap = markSegments("abcdef", [[1, 4], [2, 5]]);
+  assert.equal(overlap.map((s) => s.text).join(""), "abcdef", "overlapping ranges never duplicate text");
 });
 
 test("S3/S5: local title match is case-insensitive, finds the middle of a name and works for one character", () => {
