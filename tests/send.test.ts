@@ -56,3 +56,29 @@ test("AG1-B2: a DM to a disabled agent account is refused before the SDK and rea
   assert.equal(recipientDisabledKey(true), "composer.agentDeleted");
   assert.equal(recipientDisabledKey(false), "composer.recipientDisabled");
 });
+
+test("AG1-B2: a group message that @-mentions a disabled (deleted) agent is refused before the SDK", async () => {
+  const originalFetch = globalThis.fetch;
+  const session = { uid: "5", token: "im", jwt: "jwt", wsAddr: "ws://im" };
+  const enabled: Record<string, boolean> = { "41": true, "42": false };
+  const checked: string[] = [];
+  globalThis.fetch = async (url) => {
+    const uid = String(url).split("/").pop()!;
+    checked.push(uid);
+    return Response.json({ code: 0, data: { enabled: enabled[uid] } });
+  };
+  let sends = 0;
+  const group = { channelID: "g1", channelType: 2 };
+  const run = (mentions: string[]) => sendToEnabledRecipient(group, session, () => true, async () => { sends++; }, mentions);
+  try {
+    assert.equal(await run(["41", "42"]), "disabled");
+    assert.equal(sends, 0, "a refused mention must not send");
+    assert.deepEqual(checked, ["41", "42"]);
+    assert.equal(await run(["41"]), "sent");
+    checked.length = 0;
+    assert.equal(await run([]), "sent");
+    assert.equal(checked.length, 0, "a group message without mentions is not gated");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

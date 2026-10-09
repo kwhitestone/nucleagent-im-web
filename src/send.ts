@@ -12,13 +12,17 @@ export async function sendToEnabledRecipient(
   session: ConnectSession,
   current: () => boolean,
   send: () => Promise<void>,
+  mentionUids: string[] = [],
 ): Promise<"sent" | "disabled" | "unavailable" | "cancelled"> {
-  if (channel.channelType === 1) {
+  // A DM checks its peer; a group message checks the agents it @-mentions
+  // (AG1-B2: a deleted agent is a disabled account and would never answer).
+  const recipients = channel.channelType === 1 ? [channel.channelID] : mentionUids;
+  for (const uid of recipients) {
     let enabled: boolean | undefined;
     // Bounded, on-demand recovery only. Never clear the draft or fail open.
     for (let attempt = 0; attempt < 2 && current(); attempt++) {
       try {
-        enabled = await recipientEnabled(channel.channelID, session);
+        enabled = await recipientEnabled(uid, session);
         break;
       } catch {
         // The next send attempt can recover after this bounded retry.

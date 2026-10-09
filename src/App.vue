@@ -1048,7 +1048,7 @@ async function sendMessage(): Promise<void> {
       mentionedAgentUids.value = [];
       messages.value = mergeMessages(messages.value, [message]);
       scrollToBottom();
-    });
+    }, mentionUids);
     if (current()) recipientDisabled.value = outcome === "disabled";
     if (outcome === "unavailable") console.warn("im_recipient_check_unavailable");
   } catch (error) {
@@ -1703,7 +1703,7 @@ onBeforeUnmount(() => {
             {{ t("composer.send") }}
           </button>
           <p v-if="recipientDisabled" class="composer-hint" role="status" data-testid="recipient-disabled">
-            {{ t(recipientDisabledKey(!!activeChannel && isAgentUid(activeChannel.channelID))) }}
+            {{ t(recipientDisabledKey(!!activeChannel && (activeChannel.channelType !== 1 || isAgentUid(activeChannel.channelID)))) }}
           </p>
           <!-- Enter-to-send is a destructive default, so the UI states it. -->
           <p class="composer-hint">
