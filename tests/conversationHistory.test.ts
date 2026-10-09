@@ -70,6 +70,7 @@ function harness() {
       return { reportAuthRequired() {} };
     },
     remint: { reset() {} }, syncConversations() {}, syncGroups() {}, refreshActiveHistory() {},
+    batch: { refreshHidden() {} },
   };
   const context = createContext(state);
   runInContext(code, context);

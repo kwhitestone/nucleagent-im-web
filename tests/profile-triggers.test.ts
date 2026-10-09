@@ -144,14 +144,14 @@ test("conversation row: a direct chat's avatar is its own button that opens that
   const list = app.slice(app.indexOf('<nav class="conversation-list"'), app.indexOf("</nav>", app.indexOf('<nav class="conversation-list"')));
   const trigger = list.match(/<button\s+v-if="([^"]+)"\s+class="avatar-trigger"[\s\S]*?\/>/);
   assert.ok(trigger, "avatar trigger exists in the row");
-  assert.equal(trigger[1], "conversation.channel.channelType === ChannelTypePerson && !isResolving(conversation)",
-    "direct chats only, and only once the name resolved (the label names the person)");
+  assert.equal(trigger[1], "conversation.channel.channelType === ChannelTypePerson && !isResolving(conversation) && !batch.selecting.value",
+    "direct chats only, once the name resolved (the label names the person), and not in select mode (IM3-D4: a tap toggles)");
   assert.match(trigger[0], /type="button"/);
   assert.match(trigger[0], /data-testid="im-row-avatar-profile"/);
   assert.match(trigger[0], /:aria-label="t\('profile\.view', \{ name: conversationTitle\(conversation\) \}\)"/);
   assert.match(trigger[0], /@click="personProfile\(conversation\.channel\.channelID, \$event\.currentTarget as HTMLElement\)"/);
   assert.ok(list.indexOf("avatar-trigger") < list.indexOf('class="conversation"'), "focus order: avatar, then row");
-  assert.match(list, /class="conversation"[\s\S]*?@click="openChannel\(conversation\.channel\)"/, "row body still opens the chat");
+  assert.match(list, /class="conversation"[\s\S]*?@click="rowClicked\(conversation\)"/, "row body still opens the chat (rowClicked → openChannel outside select mode, IM3-D4)");
   // Header and row avatar share one opener with the person's resolved data.
   assert.match(app, /function personProfile\(uid: string, anchor: HTMLElement\)[\s\S]*?openProfile\(anchor, \{\s*uid,\s*known: \{ nickName: personName\(uid\), username: contact\?\.username,/);
   assert.match(app, /function headerProfile[\s\S]*?personProfile\(channel\.channelID, event\.currentTarget as HTMLElement\)/);
