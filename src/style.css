@@ -1942,3 +1942,178 @@ kbd {
   stroke-width: 2;
   stroke-linecap: round;
 }
+
+/* ---------- IM3-D4: hide / multi-select ---------- */
+.list-menu-wrap {
+  position: relative;
+}
+
+.row-menu {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  min-width: 168px;
+  padding: 4px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-lg);
+  flex-direction: column;
+}
+
+.row-menu.list-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+}
+
+.row-menu button {
+  min-height: 38px;
+  padding: 8px 14px;
+  border: 0;
+  color: var(--text-primary);
+  background: transparent;
+  text-align: left;
+}
+
+.row-menu button:hover,
+.row-menu button:focus-visible {
+  background: var(--bg-hover);
+}
+
+.menu-scrim {
+  position: fixed;
+  z-index: 29;
+  inset: 0;
+}
+
+.row-more {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-md);
+  color: var(--text-secondary);
+  background: var(--bg-card);
+  opacity: 0;
+  transform: translateY(-50%);
+}
+
+.conversation-row:hover > .row-more,
+.row-more:focus-visible {
+  opacity: 1;
+}
+
+.select-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-subtle);
+  align-items: center;
+  font-size: 12.5px;
+}
+
+.select-bar > span {
+  margin-right: auto;
+  font-weight: 600;
+}
+
+.conversation[role="checkbox"]::after {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--r-full);
+  content: "";
+}
+
+.conversation.selected {
+  background: var(--bg-hover);
+}
+
+.conversation.selected::after {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--bg-card);
+}
+
+.hidden-view {
+  min-height: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.hidden-view-head {
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+}
+
+.hidden-view .conversation {
+  padding-right: 92px;
+}
+
+.hidden-view .unhide {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+}
+
+.account-badge.hidden-tag {
+  color: var(--text-secondary);
+  background: var(--bg-subtle);
+}
+
+.notice-toast {
+  position: fixed;
+  z-index: 31;
+  bottom: 18px;
+  left: 50%;
+  display: flex;
+  gap: 12px;
+  max-width: calc(100vw - 24px);
+  margin: 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  color: var(--text-primary);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-lg);
+  align-items: center;
+  font-size: 12.5px;
+  transform: translateX(-50%);
+}
+
+.notice-toast button {
+  padding: 2px 6px;
+  border: 0;
+  color: var(--accent);
+  background: transparent;
+  font-weight: 600;
+}
+
+.notice-toast .notice-close {
+  color: var(--text-tertiary);
+}
+
+@media (max-width: 720px) {
+  /* Phones: no hover, so ⋯ stays visible; long-press opens the same menu. */
+  .row-more {
+    opacity: 1;
+  }
+
+  .notice-toast {
+    bottom: 76px;
+  }
+}

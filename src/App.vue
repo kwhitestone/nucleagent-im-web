@@ -65,6 +65,7 @@ import { getLocale } from "./i18n";
 import EmptyPaths from "./components/EmptyPaths.vue";
 import SystemLine from "./components/SystemLine.vue";
 import { configureSDK, loadMoreConversations, markRead } from "./im";
+import { channelKey, useConversationBatch } from "./hiding";
 import { carryPersisted, earlierCursor, mergeMessages, messageKey, remintGuard } from "./history";
 import { listAgents, uncontactedAgents, type DirectoryAgent } from "./agents";
 import { buildOutgoingText } from "./mentions";
@@ -212,6 +213,125 @@ const sortedConversations = computed(() =>
   [...conversations.value].sort((left, right) => right.timestamp - left.timestamp),
 );
 
+// IM3-D4 (Q3 §2): hide / unhide / mark read, one row or many; state lives on the server.
+const batch = useConversationBatch({
+  session: () => session.value,
+  conversations,
+  t,
+  // The SDK keeps its own copy of the list; a hidden row must not come back from it.
+  onHidden: (keys) => {
+    const sdk = WKSDK.shared().conversationManager;
+    const gone = new Set(keys);
+    sdk.conversations = sdk.conversations.filter((item) => !gone.has(channelKey(item.channel)));
+  },
+});
+/** Direct chats (people and agents) the viewer hid: search rows get a 已隐藏 tag. */
+const hiddenUids = computed(() => batch.hidden.value
+  .filter((item) => item.channel.channelType === ChannelTypePerson)
+  .map((item) => item.channel.channelID));
+const hiddenOpen = ref(false);
+const listMenuOpen = ref(false);
+type RowMenu = { conversation: Conversation; x: number; y: number; header: boolean };
+const menu = ref<RowMenu>();
+const longPressMs = 500;
+let pressTimer: ReturnType<typeof setTimeout> | undefined;
+let longPressed = false;
+
+/** Row ⋯, right-click, long-press or the chat header: one menu at the pointer (or under the button). */
+function openRowMenu(conversation: Conversation, event: { clientX: number; clientY: number; currentTarget?: EventTarget | null }, header = false): void {
+  let { clientX: x, clientY: y } = event;
+  const anchor = event.currentTarget instanceof HTMLElement ? event.currentTarget.getBoundingClientRect() : undefined;
+  if (anchor && !x && !y) { x = anchor.left; y = anchor.bottom; } // keyboard activation
+  menu.value = { conversation, x: Math.max(8, Math.min(x, window.innerWidth - 200)), y: Math.max(8, Math.min(y, window.innerHeight - 160)), header };
+  void nextTick(() => document.querySelector<HTMLElement>(".row-menu button")?.focus());
+}
+
+function openChatMenu(event: MouseEvent): void {
+  const channel = activeChannel.value;
+  if (!channel) return;
+  const conversation = conversations.value.find((item) => item.channel.isEqual(channel))
+    || batch.hidden.value.find((item) => item.channel.isEqual(channel))
+    || Object.assign(new Conversation(), { channel });
+  openRowMenu(conversation, event, true);
+}
+
+/** Phones: a 500 ms press opens the row menu; the click that ends it does not open the chat. */
+function pressStart(conversation: Conversation, event: PointerEvent): void {
+  if (event.pointerType !== "touch" || batch.selecting.value) return;
+  clearTimeout(pressTimer);
+  const { clientX, clientY } = event;
+  pressTimer = setTimeout(() => {
+    longPressed = true;
+    openRowMenu(conversation, { clientX, clientY });
+  }, longPressMs);
+}
+
+function pressEnd(): void {
+  clearTimeout(pressTimer);
+}
+
+function rowClicked(conversation: Conversation): void {
+  if (longPressed) {
+    longPressed = false;
+    return;
+  }
+  if (batch.selecting.value) {
+    batch.toggle(channelKey(conversation.channel));
+    return;
+  }
+  void openChannel(conversation.channel);
+}
+
+async function menuAction(action: "hide" | "unhide" | "read" | "select"): Promise<void> {
+  const target = menu.value;
+  menu.value = undefined;
+  if (!target) return;
+  const key = channelKey(target.conversation.channel);
+  if (action === "select") {
+    hiddenOpen.value = false;
+    batch.startSelecting(key);
+    return;
+  }
+  const outcome = await batch.run(action, [key]);
+  if (action === "hide" && outcome.ok.length && activeChannel.value?.isEqual(target.conversation.channel)) {
+    activeChannel.value = undefined;
+  }
+}
+
+function startSelecting(): void {
+  listMenuOpen.value = false;
+  hiddenOpen.value = false;
+  batch.startSelecting();
+}
+
+function openHiddenView(): void {
+  listMenuOpen.value = false;
+  batch.stopSelecting();
+  hiddenOpen.value = true;
+  void batch.refreshHidden();
+}
+
+/** Esc: an open menu first, then select mode. */
+function onKeydown(event: KeyboardEvent): void {
+  if (event.key !== "Escape") return;
+  if (menu.value || listMenuOpen.value) {
+    menu.value = undefined;
+    listMenuOpen.value = false;
+  } else if (batch.selecting.value) {
+    batch.stopSelecting();
+  }
+}
+
+/** H7: another device may have hidden or un-hidden rows while this tab was in the background. */
+function onVisible(): void {
+  if (document.visibilityState === "visible" && session.value && connection.value === "connected") {
+    void syncConversations();
+    void batch.refreshHidden();
+  }
+}
+document.addEventListener("keydown", onKeydown);
+document.addEventListener("visibilitychange", onVisible);
+
 /** UIDs of every agent this account has seen, so the rail can filter by them. */
 const knownAgentUids = computed(
   () => new Set([
@@ -245,12 +365,13 @@ const visibleConversations = computed(() => {
 
 /** Groups with no conversation row yet (never opened, so WuKongIM has nothing to sync). */
 const unopenedGroups = computed(() => railMode.value === "agents" ? [] : groups.value.filter(
-  (item) => !conversations.value.some((c) => c.channel.channelID === item.wukongChannelId),
+  (item) => !conversations.value.some((c) => c.channel.channelID === item.wukongChannelId)
+    && !batch.hiddenKeys.value.has(`${ChannelTypeGroup}:${item.wukongChannelId}`),
 ));
 
 /** Agents tab: directory agents with no conversation yet, below the ones already talked to. */
 const unopenedAgents = computed(() => railMode.value !== "agents" ? [] : uncontactedAgents(
-  directoryAgents.value,
+  directoryAgents.value.filter((agent) => !batch.hiddenKeys.value.has(`${ChannelTypePerson}:${agent.uid}`)),
   conversations.value.filter((c) => c.channel.channelType === ChannelTypePerson).map((c) => c.channel.channelID),
 ));
 
@@ -374,10 +495,6 @@ const mentionSuggestions = computed(() => {
   });
 });
 
-function channelKey(channel: Channel): string {
-  return `${channel.channelType}:${channel.channelID}`;
-}
-
 function messageText(message?: Message): string {
   if (!message) return "";
   if (message.streamText !== undefined) return message.streamText || "...";
@@ -488,7 +605,7 @@ const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
   if (status === ConnectStatus.Connected) {
     connection.value = "connected";
     remint.reset();
-    void Promise.all([syncConversations(), syncGroups(), refreshActiveHistory()]);
+    void Promise.all([syncConversations(), syncGroups(), refreshActiveHistory(), batch.refreshHidden()]);
     void openPendingConversation();
   } else if (status === ConnectStatus.Connecting) {
     connection.value = "connecting";
@@ -506,6 +623,8 @@ const conversationListener: ConversationListener = (conversation, action) => {
     conversations.value = conversations.value.filter((item) => channelKey(item.channel) !== key);
     return;
   }
+  // A message from someone else un-hides the row on the server; the viewer's own does not.
+  if (!batch.receive(conversation, session.value?.uid || "")) return;
   upsertConversation(conversation);
 };
 
@@ -1174,6 +1293,10 @@ function teardownSession(): void {
   directoryAgents.value = [];
   knownContacts.value = [];
   resetNames();
+  batch.reset();
+  menu.value = undefined;
+  listMenuOpen.value = false;
+  hiddenOpen.value = false;
   profileName.value = "";
   profileAvatar.value = "";
   profileRoles.value = [];
@@ -1214,6 +1337,9 @@ function signOut(): void {
 onBeforeUnmount(() => {
   clearTimeout(shellLoginTimer);
   shellBridge.dispose();
+  document.removeEventListener("keydown", onKeydown);
+  document.removeEventListener("visibilitychange", onVisible);
+  clearTimeout(pressTimer);
   teardownSession();
 });
 </script>
@@ -1371,6 +1497,22 @@ onBeforeUnmount(() => {
         >
           +
         </button>
+        <span class="list-menu-wrap">
+          <button
+            class="icon-button"
+            type="button"
+            data-testid="im-list-menu"
+            :title="t('hide.listMenu')"
+            :aria-label="t('hide.listMenu')"
+            aria-haspopup="menu"
+            :aria-expanded="listMenuOpen"
+            @click="listMenuOpen = !listMenuOpen"
+          >⋯</button>
+          <span v-if="listMenuOpen" class="row-menu list-menu" role="menu">
+            <button type="button" role="menuitem" data-testid="im-select-start" @click="startSelecting">{{ t("hide.select") }}</button>
+            <button type="button" role="menuitem" data-testid="im-hidden-entry" @click="openHiddenView">{{ t("hide.hiddenList", { count: batch.hidden.value.length }) }}</button>
+          </span>
+        </span>
       </header>
 
       <p
@@ -1389,6 +1531,7 @@ onBeforeUnmount(() => {
           :session="session"
           :placeholder="t('list.searchPlaceholder')"
           :agents="directoryAgents"
+          :hidden-uids="hiddenUids"
           @agent="openAgent"
           @select="openContact"
           @profile="openProfile"
@@ -1416,17 +1559,62 @@ onBeforeUnmount(() => {
         </button>
       </div>
 
-      <nav class="conversation-list" :aria-label="t('list.all')" @scroll.passive="conversationListScrolled">
+      <div v-if="batch.selecting.value" class="select-bar" role="toolbar" data-testid="im-select-bar" :aria-label="t('hide.select')">
+        <span data-testid="im-selected-count">{{ t("hide.selected", { count: batch.selected.value.size }) }}</span>
+        <button type="button" class="quiet" data-testid="im-select-all" @click="batch.selectAll(visibleConversations.map((item) => channelKey(item.channel)))">{{ t("hide.selectAll") }}</button>
+        <button type="button" class="quiet" data-testid="im-select-hide" :disabled="!batch.selected.value.size || batch.busy.value" @click="batch.runSelected('hide')">{{ t("hide.hide") }}</button>
+        <button type="button" class="quiet" data-testid="im-select-read" :disabled="!batch.selected.value.size || batch.busy.value" @click="batch.runSelected('read')">{{ t("hide.markRead") }}</button>
+        <button type="button" class="quiet" data-testid="im-select-cancel" @click="batch.stopSelecting()">{{ t("hide.cancel") }}</button>
+      </div>
+
+      <section v-if="hiddenOpen" class="hidden-view" data-testid="im-hidden-view" :aria-label="t('hide.hiddenTitle')">
+        <header class="hidden-view-head">
+          <button class="icon-button" type="button" data-testid="im-hidden-back" :aria-label="t('hide.back')" @click="hiddenOpen = false">‹</button>
+          <strong>{{ t("hide.hiddenList", { count: batch.hidden.value.length }) }}</strong>
+        </header>
+        <div v-for="conversation in batch.hidden.value" :key="channelKey(conversation.channel)" class="conversation-row" data-testid="im-hidden-row">
+          <button class="conversation" type="button" @click="openChannel(conversation.channel)">
+            <RowAvatar
+              :id="conversation.channel.channelID"
+              :name="conversationTitle(conversation)"
+              :kind="conversationKind(conversation)"
+              :unnamed="isResolving(conversation)"
+            />
+            <span class="conversation-copy">
+              <span class="conversation-name">
+                <strong v-if="isResolving(conversation)" class="name-skeleton" :aria-label="t('chat.loading')" />
+                <strong v-else>{{ conversationTitle(conversation) }}</strong>
+              </span>
+              <small>{{ conversationSubtitle(conversation) || t("empty.noMessages") }}</small>
+            </span>
+          </button>
+          <button
+            class="quiet unhide"
+            type="button"
+            data-testid="im-unhide"
+            :disabled="batch.busy.value"
+            @click="batch.run('unhide', [channelKey(conversation.channel)])"
+          >{{ t("hide.unhide") }}</button>
+        </div>
+        <p v-if="!batch.hidden.value.length" class="empty-list">{{ t("hide.hiddenEmpty") }}</p>
+      </section>
+
+      <nav class="conversation-list" v-show="!hiddenOpen" :aria-label="t('list.all')" @scroll.passive="conversationListScrolled">
         <div
           v-for="conversation in visibleConversations"
           :key="channelKey(conversation.channel)"
           class="conversation-row"
+          @contextmenu.prevent="openRowMenu(conversation, $event)"
+          @pointerdown="pressStart(conversation, $event)"
+          @pointerup="pressEnd"
+          @pointercancel="pressEnd"
+          @pointerleave="pressEnd"
         >
         <!-- Direct chat: the avatar is its own control, a sibling over the
              avatar column (no button-in-button), opening that person's card;
              the row still opens the chat (UNI-AVATAR-CARD-R2). Groups: none. -->
         <button
-          v-if="conversation.channel.channelType === ChannelTypePerson && !isResolving(conversation)"
+          v-if="conversation.channel.channelType === ChannelTypePerson && !isResolving(conversation) && !batch.selecting.value"
           class="avatar-trigger"
           type="button"
           data-testid="im-row-avatar-profile"
@@ -1435,9 +1623,11 @@ onBeforeUnmount(() => {
         />
         <button
           class="conversation"
-          :class="{ active: activeChannel?.isEqual(conversation.channel) }"
+          :class="{ active: activeChannel?.isEqual(conversation.channel), selected: batch.selecting.value && batch.selected.value.has(channelKey(conversation.channel)) }"
           type="button"
-          @click="openChannel(conversation.channel)"
+          :role="batch.selecting.value ? 'checkbox' : undefined"
+          :aria-checked="batch.selecting.value ? batch.selected.value.has(channelKey(conversation.channel)) : undefined"
+          @click="rowClicked(conversation)"
         >
           <RowAvatar
             :id="conversation.channel.channelID"
@@ -1465,6 +1655,15 @@ onBeforeUnmount(() => {
             >{{ conversation.unread }}</span>
           </span>
         </button>
+        <button
+          v-if="!batch.selecting.value"
+          class="row-more"
+          type="button"
+          data-testid="im-row-more"
+          :aria-label="t('hide.rowMenu', { name: conversationTitle(conversation) })"
+          aria-haspopup="menu"
+          @click.stop="openRowMenu(conversation, $event)"
+        >⋯</button>
         </div>
 
         <!-- Groups this account belongs to but has no conversation row for yet
@@ -1558,6 +1757,16 @@ onBeforeUnmount(() => {
           <button v-if="activeGroup" class="quiet" type="button" @click="showGroupDetails">
             {{ t("chat.members") }}
           </button>
+          <button
+            v-if="activeChannel"
+            class="icon-button"
+            type="button"
+            data-testid="im-chat-menu"
+            :title="t('hide.chatMenu')"
+            :aria-label="t('hide.chatMenu')"
+            aria-haspopup="menu"
+            @click="openChatMenu($event)"
+          >⋯</button>
         </div>
       </header>
 
@@ -1727,5 +1936,24 @@ onBeforeUnmount(() => {
     <!-- Only genuinely global failures stay a toast; conversation-scoped ones
          became system lines above. -->
     <p v-if="loginError" class="toast" role="alert" @click="loginError = ''">{{ loginError }}</p>
+    <!-- IM3-D4: one row menu (⋯, right-click, long-press, chat header). -->
+    <div v-if="menu || listMenuOpen" class="menu-scrim" @click="menu = undefined; listMenuOpen = false" @contextmenu.prevent="menu = undefined" />
+    <div v-if="menu" class="row-menu" role="menu" data-testid="im-row-menu" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }">
+      <button
+        v-if="batch.hiddenKeys.value.has(channelKey(menu.conversation.channel))"
+        type="button"
+        role="menuitem"
+        data-testid="im-menu-unhide"
+        @click="menuAction('unhide')"
+      >{{ t("hide.unhide") }}</button>
+      <button v-else type="button" role="menuitem" data-testid="im-menu-hide" @click="menuAction('hide')">{{ t("hide.hideChat") }}</button>
+      <button v-if="menu.conversation.unread" type="button" role="menuitem" data-testid="im-menu-read" @click="menuAction('read')">{{ t("hide.markRead") }}</button>
+      <button v-if="!menu.header" type="button" role="menuitem" data-testid="im-menu-select" @click="menuAction('select')">{{ t("hide.select") }}</button>
+    </div>
+    <p v-if="batch.notice.value" class="notice-toast" role="status" data-testid="im-notice">
+      <span>{{ batch.notice.value.text }}</span>
+      <button v-if="batch.notice.value.undo" type="button" data-testid="im-undo" @click="batch.undo()">{{ t("hide.undo") }}</button>
+      <button type="button" class="notice-close" :aria-label="t('hide.dismiss')" @click="batch.dismiss()">×</button>
+    </p>
   </main>
 </template>

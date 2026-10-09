@@ -31,6 +31,13 @@ const args: Record<string, Record<string, unknown>> = {
   "composer.removeMention": { name: "research-bot" },
   "group.allowlistTitle": { agent: "research-bot" },
   "group.allowlistOwner": { name: "Chen Mo" },
+  "hide.rowMenu": { name: "Chen Mo" },
+  "hide.selected": { count: 5 },
+  "hide.hiddenList": { count: 2 },
+  "hide.doneHide": { count: 5 },
+  "hide.doneUnhide": { count: 5 },
+  "hide.doneRead": { count: 5 },
+  "hide.partial": { ok: 4, failed: 1 },
 };
 
 test("both locales define exactly the same keys", () => {
