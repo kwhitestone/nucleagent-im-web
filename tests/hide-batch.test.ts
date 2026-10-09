@@ -110,6 +110,7 @@ test("H1: hide removes the row, it shows in the hidden view with unread cleared;
     assert.ok(batch.hiddenKeys.value.has("2:b"));
     assert.deepEqual(hiddenEvents, [["2:b"]], "the app drops it from the SDK cache too");
     await batch.run("unhide", ["2:b"]);
+    assert.equal(batch.notice.value?.undo, undefined, "only hide offers undo");
     assert.deepEqual(batch.hidden.value, []);
     assert.deepEqual(sorted(conversations.value), before, "back at its original position");
   } finally { stub.restore(); batch.reset(); }
@@ -169,9 +170,9 @@ test("H5: selection is by channelKey, so picks on page 1 survive loading page 2;
     await batch.runSelected("hide");
     assert.deepEqual(stub.calls[0].body.channels.map((c: any) => c.channel_id), ["p1-0", "p1-1", "p2-0", "p2-1"]);
     assert.equal(conversations.value.length, 56);
-    batch.startSelecting();
+    batch.startSelecting("2:elsewhere"); // picked before a filter change, not on screen now
     batch.selectAll(keys(conversations.value));
-    assert.equal(batch.selected.value.size, 56);
+    assert.equal(batch.selected.value.size, 57, "select-all adds to the selection, it does not replace it");
   } finally { stub.restore(); batch.reset(); }
 });
 
