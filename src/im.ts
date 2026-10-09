@@ -130,9 +130,14 @@ export interface ConversationPage {
   nextCursor: string;
 }
 
-/** One page of the cursor-paged conversation list (UNI-IM-DB W4: default 50, newest first). */
-export async function loadConversationPage(session: ConnectSession, cursor = ""): Promise<ConversationPage> {
-  const result = await postIM<Row>("/api/v1/im/conversation/list", cursor ? { cursor } : {}, session);
+/**
+ * One page of the cursor-paged conversation list (UNI-IM-DB W4: default 50, newest first).
+ * hidden: the caller's hidden conversations instead (IM3-D4, Q3 §2).
+ */
+export async function loadConversationPage(session: ConnectSession, cursor = "", hidden = false): Promise<ConversationPage> {
+  const body: Row = hidden ? { hidden: true } : {};
+  if (cursor) body.cursor = cursor;
+  const result = await postIM<Row>("/api/v1/im/conversation/list", body, session);
   return {
     conversations: rows(result, "conversations").map(conversationFromRow),
     nextCursor: result && !result.done ? String(result.next_cursor || "") : "",
