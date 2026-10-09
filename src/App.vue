@@ -19,6 +19,8 @@ import {
   WKSDK,
 } from "wukongimjssdk";
 import {
+  type DirectoryEntry,
+  provisionContact,
   createSession,
   getGroupMembers,
   imBase,
@@ -56,7 +58,7 @@ import {
   saveCachedProfile,
 } from "./profile";
 import { accountTypeOf, avatarFailed, avatarSrc, ensureNames, handleFor, isEnterprise, isMissing, nameFor, openIdOf, resetNames } from "./names";
-import ContactPicker from "./components/ContactPicker.vue";
+import SearchPanel from "./components/SearchPanel.vue";
 import GroupDialog from "./components/GroupDialog.vue";
 import RowAvatar from "./components/RowAvatar.vue";
 import IdentityCard from "./components/IdentityCard.vue";
@@ -98,6 +100,7 @@ const connection = ref<ConnectionState>("disconnected");
 // Which rail slot is selected. Purely a list filter; it never touches the SDK.
 type RailMode = "all" | "groups" | "agents";
 const railMode = ref<RailMode>("all");
+// IM3-D5: the search page (SearchPanel) replaces the list while open.
 const searchOpen = ref(false);
 // This account's own display name, read from auth's user-info endpoint.
 // "Portal user <uid>" is treated as absent (profile.ts); the rail card then
@@ -225,10 +228,6 @@ const batch = useConversationBatch({
     sdk.conversations = sdk.conversations.filter((item) => !gone.has(channelKey(item.channel)));
   },
 });
-/** Direct chats (people and agents) the viewer hid: search rows get a 已隐藏 tag. */
-const hiddenUids = computed(() => batch.hidden.value
-  .filter((item) => item.channel.channelType === ChannelTypePerson)
-  .map((item) => item.channel.channelID));
 const hiddenOpen = ref(false);
 const listMenuOpen = ref(false);
 type RowMenu = { conversation: Conversation; x: number; y: number; header: boolean };
@@ -313,6 +312,15 @@ function openHiddenView(): void {
 
 /** Esc: an open menu first, then select mode. */
 function onKeydown(event: KeyboardEvent): void {
+  const target = event.target as HTMLElement | null;
+  const typing = !!target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+  // IM3-D5: Ctrl/⌘+K anywhere, "/" when not typing, open the search page.
+  if (((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") || (event.key === "/" && !typing && !event.ctrlKey && !event.metaKey && !event.altKey)) {
+    if (!session.value) return;
+    event.preventDefault();
+    focusSearch();
+    return;
+  }
   if (event.key !== "Escape") return;
   if (menu.value || listMenuOpen.value) {
     menu.value = undefined;
@@ -472,14 +480,32 @@ function conversationTime(conversation: Conversation): string {
 
 function focusSearch(): void {
   searchOpen.value = true;
-  void nextTick(() => {
-    document.querySelector<HTMLInputElement>(".sidebar-tools .contact-search")?.focus();
-  });
+  hiddenOpen.value = false;
+  batch.stopSelecting();
+  void nextTick(() => document.querySelector<HTMLInputElement>("[data-testid=im-search-input]")?.focus());
 }
 
 function openDial(): void {
   dialOpen.value = true;
-  searchOpen.value = true;
+}
+
+/** Every conversation search can name: the list plus the hidden ones (they carry a tag). */
+const searchableConversations = computed(() => [...conversations.value, ...batch.hidden.value]);
+
+function openFromSearch(channel: Channel, around?: number): void {
+  searchOpen.value = false;
+  void openChannel(channel, around);
+}
+
+async function searchContact(entry: DirectoryEntry): Promise<void> {
+  const readSession = session.value;
+  if (!readSession) return;
+  try {
+    openContact(entry.provisioned ? entry : await provisionContact(entry, readSession));
+    searchOpen.value = false;
+  } catch (error) {
+    loginError.value = error instanceof Error ? error.message : t("search.errFailed");
+  }
 }
 const busy = computed(() => liveResponses.value.some((response) => response.status === "busy"));
 const mentionQuery = computed(() => {
@@ -1029,7 +1055,18 @@ function retryAgentStream(): void {
   if (channel) startAgentStream(channel, viewGeneration);
 }
 
-async function openChannel(channel: Channel): Promise<void> {
+// IM3-D5 (S2): a message hit opens its chat around that message and highlights it for 2 s.
+const locateMs = 2000;
+const locatedSeq = ref(0);
+let locateTimer: ReturnType<typeof setTimeout> | undefined;
+function locate(seq: number): void {
+  clearTimeout(locateTimer);
+  locatedSeq.value = seq;
+  void nextTick(() => chatElement.value?.querySelector(`[data-seq="${seq}"]`)?.scrollIntoView({ block: "center" }));
+  locateTimer = setTimeout(() => { locatedSeq.value = 0; }, locateMs);
+}
+
+async function openChannel(channel: Channel, around?: number): Promise<void> {
   viewGeneration += 1;
   const generation = viewGeneration;
   activeChannel.value = channel;
@@ -1051,6 +1088,21 @@ async function openChannel(channel: Channel): Promise<void> {
   }
 
   try {
+    if (around) {
+      // messagesync is keyed by message_seq (reads.go channelMessages): Down = at or before, Up = at or after.
+      // ponytail: newer than 30 after the hit are not loaded; reopening the chat shows the latest.
+      const sync = WKSDK.shared().chatManager;
+      const [older, newer] = await Promise.all([
+        sync.syncMessages(channel, { limit: 30, startMessageSeq: around, endMessageSeq: 0, pullMode: PullMode.Down }),
+        sync.syncMessages(channel, { limit: 30, startMessageSeq: around, endMessageSeq: 0, pullMode: PullMode.Up }),
+      ]);
+      if (generation !== viewGeneration) return;
+      messages.value = mergeMessages(older, newer);
+      reconcileResponses();
+      historyFinished.value = older.length < 30;
+      locate(around);
+      return;
+    }
     const history = await WKSDK.shared().chatManager.syncMessages(channel, {
       limit: 30,
       startMessageSeq: 0,
@@ -1297,6 +1349,7 @@ function teardownSession(): void {
   menu.value = undefined;
   listMenuOpen.value = false;
   hiddenOpen.value = false;
+  searchOpen.value = false;
   profileName.value = "";
   profileAvatar.value = "";
   profileRoles.value = [];
@@ -1340,6 +1393,7 @@ onBeforeUnmount(() => {
   document.removeEventListener("keydown", onKeydown);
   document.removeEventListener("visibilitychange", onVisible);
   clearTimeout(pressTimer);
+  clearTimeout(locateTimer);
   teardownSession();
 });
 </script>
@@ -1527,16 +1581,18 @@ onBeforeUnmount(() => {
         <button v-if="connection === 'disconnected'" type="button" @click="reconnectIm">{{ t("system.reconnect") }}</button>
       </p>
 
-      <div class="sidebar-tools">
-        <ContactPicker
-          :session="session"
+      <div v-show="!searchOpen" class="sidebar-tools">
+        <!-- IM3-D5: one entry to the search page (it replaces the list while open). -->
+        <input
+          class="contact-search search-trigger"
+          type="search"
+          readonly
+          data-testid="im-search-trigger"
           :placeholder="t('list.searchPlaceholder')"
-          :agents="directoryAgents"
-          :hidden-uids="hiddenUids"
-          @agent="openAgent"
-          @select="openContact"
-          @profile="openProfile"
-        />
+          :aria-label="t('list.searchPlaceholder')"
+          @focus="focusSearch"
+          @click="focusSearch"
+        >
         <form v-if="dialOpen" class="uid-dial" @submit.prevent="dialOpenIdSubmit">
           <input
             v-model="dialOpenId"
@@ -1568,7 +1624,7 @@ onBeforeUnmount(() => {
         <button type="button" class="quiet" data-testid="im-select-cancel" @click="batch.stopSelecting()">{{ t("hide.cancel") }}</button>
       </div>
 
-      <section v-if="hiddenOpen" class="hidden-view" data-testid="im-hidden-view" :aria-label="t('hide.hiddenTitle')">
+      <section v-if="hiddenOpen && !searchOpen" class="hidden-view" data-testid="im-hidden-view" :aria-label="t('hide.hiddenTitle')">
         <header class="hidden-view-head">
           <button class="icon-button" type="button" data-testid="im-hidden-back" :aria-label="t('hide.back')" @click="hiddenOpen = false">‹</button>
           <strong>{{ t("hide.hiddenList", { count: batch.hidden.value.length }) }}</strong>
@@ -1600,7 +1656,22 @@ onBeforeUnmount(() => {
         <p v-if="!batch.hidden.value.length" class="empty-list">{{ t("hide.hiddenEmpty") }}</p>
       </section>
 
-      <nav class="conversation-list" v-show="!hiddenOpen" :aria-label="t('list.all')" @scroll.passive="conversationListScrolled">
+      <SearchPanel
+        v-if="searchOpen"
+        :session="session"
+        :conversations="searchableConversations"
+        :hidden-keys="batch.hiddenKeys.value"
+        :agents="directoryAgents"
+        :title-for="conversationTitle"
+        @close="searchOpen = false"
+        @conversation="(conversation) => openFromSearch(conversation.channel)"
+        @contact="searchContact"
+        @agent="(agent) => { searchOpen = false; openAgent(agent); }"
+        @message="(hit) => openFromSearch(hit.channel, hit.seq)"
+        @profile="openProfile"
+      />
+
+      <nav class="conversation-list" v-show="!hiddenOpen && !searchOpen" :aria-label="t('list.all')" @scroll.passive="conversationListScrolled">
         <div
           v-for="conversation in visibleConversations"
           :key="channelKey(conversation.channel)"
@@ -1807,7 +1878,8 @@ onBeforeUnmount(() => {
             v-for="message in messages"
             :key="messageKey(message)"
             class="message"
-            :class="{ own: isOwnMessage(message), agent: isAgentMessage(message) }"
+            :class="{ own: isOwnMessage(message), agent: isAgentMessage(message), located: message.messageSeq === locatedSeq }"
+            :data-seq="message.messageSeq"
           >
             <!-- Message avatar (UNI-IM-AVATARS): resolve data's avatar image,
                  else the same initial-letter placeholder every other avatar uses. -->

@@ -26,8 +26,6 @@ const props = withDefaults(defineProps<{
   placeholder?: string;
   /** UNI-IM-REDESIGN: when given, matching agents get their own section above people. */
   agents?: DirectoryAgent[];
-  /** IM3-D4: direct chats the viewer hid; their rows carry a 已隐藏 tag. */
-  hiddenUids?: string[];
 }>(), {
   modelValue: () => [],
   multiple: false,
@@ -35,7 +33,6 @@ const props = withDefaults(defineProps<{
   label: "",
   placeholder: "",
   agents: () => [],
-  hiddenUids: () => [],
 });
 
 const emit = defineEmits<{
@@ -303,7 +300,6 @@ onBeforeUnmount(() => {
             <strong>{{ nameFor(String(agent.uid)) || agent.name }}</strong>
             <small v-if="agent.description">{{ agent.description }}</small>
           </span>
-          <span v-if="props.hiddenUids.includes(String(agent.uid))" class="account-badge hidden-tag">{{ t("hide.tag") }}</span>
           <span class="account-badge agent">{{ t("badge.agent") }}</span>
         </button>
       </div>
@@ -318,7 +314,6 @@ onBeforeUnmount(() => {
             <small v-if="contact.provisioned">{{ rowSub(contact) }}</small>
             <small v-else>{{ portalSub(contact) }}</small>
           </span>
-          <span v-if="props.hiddenUids.includes(String(contact.id))" class="account-badge hidden-tag">{{ t("hide.tag") }}</span>
           <span class="account-badge" :class="contact.provisioned ? contact.accountType : 'portal'">
             {{ contact.accountType === "agent" ? t("badge.agent") : t("badge.person") }}
           </span>
@@ -354,7 +349,6 @@ onBeforeUnmount(() => {
             <small v-if="contact.provisioned">{{ rowSub(contact) }}</small>
             <small v-else>{{ portalSub(contact) }}</small>
           </span>
-          <span v-if="props.hiddenUids.includes(String(contact.id))" class="account-badge hidden-tag">{{ t("hide.tag") }}</span>
           <span class="account-badge" :class="contact.provisioned ? contact.accountType : 'portal'">
             {{ contact.accountType === "agent" ? t("badge.agent") : t("badge.person") }}
           </span>

@@ -24,7 +24,7 @@ test("message sender: another person's name is a button; own messages are not", 
 });
 
 test("picker and group dialog forward their profile events to the one opener", () => {
-  assert.match(app, /<ContactPicker[\s\S]*?@profile="openProfile"/);
+  assert.match(app, /<SearchPanel[\s\S]*?@profile="openProfile"/, "IM3-D5: the search page's contact ⓘ");
   assert.match(app, /<GroupDialog[\s\S]*?@profile="openProfile"/);
   assert.match(app, /accountUi\.openProfile\(anchor, profileParams\(session\.value/);
 });

@@ -72,7 +72,8 @@ test("App: the directory loads per session and feeds the Agents tab, agent taggi
   assert.match(app, /const unopenedAgents = computed\(\(\) => railMode\.value !== "agents" \? \[\] : uncontactedAgents\(/);
   assert.match(app, /v-for="agent in unopenedAgents"[\s\S]*?@click="openAgent\(agent\)"/);
   assert.match(app, /function openAgent\(agent: DirectoryAgent\): void \{\s*void openChannel\(new Channel\(String\(agent\.uid\), ChannelTypePerson\)\);/);
-  assert.match(app, /<ContactPicker[\s\S]*?:agents="directoryAgents"[\s\S]*?@agent="openAgent"/);
+  // IM3-D5: the search page took over from the sidebar picker; agents still feed it and open the DM.
+  assert.match(app, /<SearchPanel[\s\S]*?:agents="directoryAgents"[\s\S]*?@agent="\(agent\) => \{ searchOpen = false; openAgent\(agent\); \}"/);
 });
 
 test("App: each tab has its own empty state, and a phone rail tap closes the chat covering the list", () => {

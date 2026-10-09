@@ -38,6 +38,7 @@ const args: Record<string, Record<string, unknown>> = {
   "hide.doneUnhide": { count: 5 },
   "hide.doneRead": { count: 5 },
   "hide.partial": { ok: 4, failed: 1 },
+  "search.empty": { query: "蓝鲸" },
 };
 
 test("both locales define exactly the same keys", () => {

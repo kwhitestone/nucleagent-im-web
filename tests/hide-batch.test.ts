@@ -271,7 +271,7 @@ test("phones keep the list ⋯ menu: it is not inside a span (.sidebar-header sp
 });
 
 test("Esc leaves select mode (and closes an open menu first)", () => {
-  const esc = app.slice(app.indexOf("function onKeydown"), app.indexOf("function onKeydown") + 400);
+  const esc = app.slice(app.indexOf("function onKeydown"), app.indexOf("function onVisible"));
   assert.match(esc, /Escape/);
   assert.match(esc, /menu\.value[\s\S]*?stopSelecting\(\)/);
   assert.match(app, /document\.addEventListener\("keydown", onKeydown\)/);
@@ -296,10 +296,9 @@ test("a pushed conversation goes through receive(); hidden rows never reappear a
 });
 
 test("search results tag hidden chats 已隐藏; the session teardown resets hiding state", () => {
-  assert.match(app, /<ContactPicker[\s\S]*?:hidden-uids="hiddenUids"/);
-  const picker = readFileSync("src/components/ContactPicker.vue", "utf8");
-  assert.match(picker, /hiddenUids\?: string\[\]/);
-  assert.ok((picker.match(/t\("hide\.tag"\)/g) || []).length >= 2, "agent and people rows");
+  // IM3-D5: search moved to SearchPanel, which gets hidden conversations and their keys.
+  assert.match(app, /<SearchPanel[\s\S]*?:conversations="searchableConversations"[\s\S]*?:hidden-keys="batch\.hiddenKeys\.value"/);
+  assert.match(app, /const searchableConversations = computed\(\(\) => \[\.\.\.conversations\.value, \.\.\.batch\.hidden\.value\]\)/);
   assert.equal(zh.hide.tag, "已隐藏");
   const teardown = app.slice(app.indexOf("function teardownSession"), app.indexOf("function openAccount"));
   assert.match(teardown, /batch\.reset\(\)/);
