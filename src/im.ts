@@ -6,6 +6,8 @@ import {
   MessageStatus,
   Setting,
   WKSDK,
+  type MessageContent,
+  type SendackPacket,
   type SyncOptions,
 } from "wukongimjssdk";
 import { postIM, type ConnectSession } from "./api.ts";
@@ -113,14 +115,38 @@ export function configureSDK(session: ConnectSession): WKSDK {
     return rows(result, "messages").map((row) => markPersisted(messageFromRow(row, channel)));
   };
   // The SDK's sync() loads the first page; later pages come from loadConversationPage.
-  config.provider.syncConversationsCallback = async () => {
-    const page = await loadConversationPage(session);
-    conversationCursor = page.nextCursor;
-    return page.conversations;
+  // IM-FIX1: connect, reconnect and "tab back in front" all call sync() and each used to
+  // replace the list with page 1 and reset the cursor, so the rows of pages 2+ vanished
+  // and scrolling re-requested them. One pull at a time, and as many pages as were loaded.
+  if (syncedUid !== session.uid) {
+    syncedUid = session.uid;
+    loadedPages = 1;
+    conversationCursor = "";
+  }
+  config.provider.syncConversationsCallback = () => {
+    syncing ??= (async () => {
+      const all: Conversation[] = [];
+      let cursor = "";
+      let pages = 0;
+      do {
+        const page = await loadConversationPage(session, cursor);
+        all.push(...page.conversations);
+        cursor = page.nextCursor;
+        pages++;
+      } while (cursor && pages < loadedPages);
+      loadedPages = pages;
+      conversationCursor = cursor;
+      return all;
+    })().finally(() => { syncing = undefined; });
+    return syncing;
   };
   sdk.config = config;
   return sdk;
 }
+
+let syncedUid = "";
+let loadedPages = 1;
+let syncing: Promise<Conversation[]> | undefined;
 
 /** The cursor for the next conversation page; "" once the list is exhausted. */
 export let conversationCursor = "";
@@ -146,10 +172,42 @@ export async function loadConversationPage(session: ConnectSession, cursor = "",
 
 /** The next page after the SDK's first one; [] when there is none. */
 export async function loadMoreConversations(session: ConnectSession): Promise<Conversation[]> {
+  if (syncing) await syncing.catch(() => undefined); // its cursor, not a stale one
   if (!conversationCursor) return [];
   const page = await loadConversationPage(session, conversationCursor);
   conversationCursor = page.nextCursor;
+  loadedPages++;
   return page.conversations;
+}
+
+/**
+ * chatManager.send() resolves once the packet is queued; the SDK writes it to the socket on
+ * its next 100 ms tick. Closing or reloading the page in between silently lost the message
+ * (IM-FIX1: the last group created per tab never got a conversation row). This resolves on
+ * WuKongIM's sendack for the packet, and rejects after ackMs so the caller keeps the draft.
+ */
+export function sendAcked(content: MessageContent, channel: Channel, ackMs = 10000): Promise<Message> {
+  const chat = WKSDK.shared().chatManager;
+  return new Promise((resolve, reject) => {
+    let sent: Message | undefined;
+    const early = new Set<number>(); // acks seen before send() returned
+    const done = (error?: Error) => {
+      clearTimeout(timer);
+      chat.removeMessageStatusListener(listener);
+      if (error) reject(error);
+      else resolve(sent!);
+    };
+    const listener = (ack: SendackPacket) => {
+      if (!sent) early.add(ack.clientSeq);
+      else if (ack.clientSeq === sent.clientSeq) done();
+    };
+    const timer = setTimeout(() => done(new Error("message not acknowledged")), ackMs);
+    chat.addMessageStatusListener(listener);
+    chat.send(content, channel).then((message) => {
+      sent = message;
+      if (early.has(message.clientSeq)) done();
+    }, (error) => done(error instanceof Error ? error : new Error(String(error))));
+  });
 }
 
 /** Clears the caller's unread count on a channel (UNI-IM-DB W4 /conversation/read). */

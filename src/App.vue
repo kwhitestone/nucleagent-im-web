@@ -66,7 +66,7 @@ import { profileActions, profileParams, useAccountPopover, type ProfileTarget } 
 import { getLocale } from "./i18n";
 import EmptyPaths from "./components/EmptyPaths.vue";
 import SystemLine from "./components/SystemLine.vue";
-import { configureSDK, loadMoreConversations, markRead } from "./im";
+import { configureSDK, loadMoreConversations, markRead, sendAcked } from "./im";
 import { channelKey, useConversationBatch } from "./hiding";
 import { carryPersisted, earlierCursor, mergeMessages, messageKey, remintGuard } from "./history";
 import { listAgents, uncontactedAgents, type DirectoryAgent } from "./agents";
@@ -1212,7 +1212,8 @@ async function sendMessage(): Promise<void> {
   try {
     const outcome = await sendToEnabledRecipient(channel, sendSession, current, async () => {
       const content = buildOutgoingText(text, channel.channelType, mentionUids);
-      const message = await WKSDK.shared().chatManager.send(content, channel);
+      // The SDK shows it at once (message listener); the draft goes only once it is on the server.
+      const message = await sendAcked(content, channel);
       if (!current()) return;
       draft.value = "";
       mentionedAgentUids.value = [];
@@ -2024,7 +2025,16 @@ onBeforeUnmount(() => {
       <button v-if="menu.conversation.unread" type="button" role="menuitem" data-testid="im-menu-read" @click="menuAction('read')">{{ t("hide.markRead") }}</button>
       <button v-if="!menu.header" type="button" role="menuitem" data-testid="im-menu-select" @click="menuAction('select')">{{ t("hide.select") }}</button>
     </div>
-    <p v-if="batch.notice.value" class="notice-toast" role="status" data-testid="im-notice">
+    <p
+      v-if="batch.notice.value"
+      class="notice-toast"
+      role="status"
+      @mouseenter="batch.pauseNotice()"
+      @mouseleave="batch.resumeNotice()"
+      @focusin="batch.pauseNotice()"
+      @focusout="batch.resumeNotice()"
+      data-testid="im-notice"
+    >
       <span>{{ batch.notice.value.text }}</span>
       <button v-if="batch.notice.value.undo" type="button" data-testid="im-undo" @click="batch.undo()">{{ t("hide.undo") }}</button>
       <button type="button" class="notice-close" :aria-label="t('hide.dismiss')" @click="batch.dismiss()">×</button>

@@ -1,7 +1,7 @@
 // IM3-D4 (Q3 §2): hide / unhide / mark read on one or many conversations.
 // The server holds the state per viewer (im_conversations.hidden_at), so this is
 // only the client's view of it: the batch call, the hidden list, the selection
-// (by channelKey, so it survives paging) and the 5 s undo toast.
+// (by channelKey, so it survives paging) and the 10 s undo toast (paused on hover/focus).
 import { ref, type Ref, type ShallowRef } from "vue";
 import { Channel, type Conversation } from "wukongimjssdk";
 import { postIM, type ConnectSession } from "./api.ts";
@@ -9,7 +9,7 @@ import { loadConversationPage } from "./im.ts";
 
 export type BatchAction = "hide" | "unhide" | "read";
 export const batchLimit = 100; // im rejects >100 channels per call (reads.go batchMax)
-export const undoMs = 5000;
+export const undoMs = 10000; // IM-FIX1: 5 s was too short to reach the button
 
 export function channelKey(channel: Channel): string {
   return `${channel.channelType}:${channel.channelID}`;
@@ -84,10 +84,27 @@ export function useConversationBatch(options: {
     hiddenKeys.value = new Set(list.map((c) => channelKey(c.channel)));
   };
 
-  function show(next?: Notice): void {
+  // Pointer and keyboard focus each hold the toast open; the full undoMs restarts once both left.
+  let holds = 0;
+  const arm = () => {
     clearTimeout(noticeTimer);
+    if (notice.value?.undo && !holds) noticeTimer = setTimeout(() => { notice.value = undefined; }, undoMs);
+  };
+
+  function show(next?: Notice): void {
     notice.value = next;
-    if (next?.undo) noticeTimer = setTimeout(() => { notice.value = undefined; }, undoMs);
+    holds = 0;
+    arm();
+  }
+
+  function pauseNotice(): void {
+    holds = Math.min(holds + 1, 2);
+    arm();
+  }
+
+  function resumeNotice(): void {
+    holds = Math.max(holds - 1, 0);
+    arm();
   }
 
   /** Applies a successful action locally, the same way the server just did. */
@@ -205,5 +222,5 @@ export function useConversationBatch(options: {
     busy.value = false;
   }
 
-  return { hidden, hiddenKeys, selecting, selected, busy, notice, run, runSelected, undo, startSelecting, stopSelecting, toggle, selectAll, receive, refreshHidden, reset, dismiss: () => show() };
+  return { hidden, hiddenKeys, selecting, selected, busy, notice, run, runSelected, undo, startSelecting, stopSelecting, toggle, selectAll, receive, refreshHidden, reset, pauseNotice, resumeNotice, dismiss: () => show() };
 }

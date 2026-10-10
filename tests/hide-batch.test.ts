@@ -1,5 +1,5 @@
 // IM3-D4 (Q3 §2, §6 H1–H8 front end): hide / unhide / mark-read on many conversations,
-// the hidden view, the 5 s undo, selection that survives paging, partial failures.
+// the hidden view, the 10 s undo (IM-FIX1), selection that survives paging, partial failures.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test, { after, mock } from "node:test";
@@ -137,13 +137,13 @@ test("H4: multi-select 5 of 6 → hide without a confirm → toast offers undo �
   } finally { stub.restore(); batch.reset(); mock.timers.reset(); }
 });
 
-test("the undo offer lasts 5 s, then the toast goes and nothing is unhidden", async () => {
+test("the undo offer lasts 10 s, then the toast goes and nothing is unhidden", async () => {
   mock.timers.enable({ apis: ["setTimeout"] });
   const { batch } = setup([conv("a", 1)]);
   const stub = stubFetch(batchServer(new Set(["2:a"])));
   try {
     await batch.run("hide", ["2:a"]);
-    assert.equal(undoMs, 5000);
+    assert.equal(undoMs, 10000);
     mock.timers.tick(undoMs - 1);
     assert.ok(batch.notice.value?.undo);
     mock.timers.tick(1);
