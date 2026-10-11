@@ -7,6 +7,17 @@ const agent = { uid: 12, name: "New", description: "", avatar: "", revision: "op
 const response = (data: unknown, revision = "directory-a") => new Response(JSON.stringify({ code: 0, data }),
   { headers: { "X-IM-Directory-Revision": revision } });
 
+test("directory invokes native fetch without an AgentDirectory receiver", async () => {
+  const directory = new AgentDirectory(async function (this: unknown, input) {
+    assert.equal(this, undefined, "Browser fetch rejects a custom receiver");
+    return String(input).includes("/events?")
+      ? response({ changed: false, revision: "directory-a" }) : response([agent]);
+  });
+  await directory.refresh(session);
+  assert.equal(await directory.poll(session), false);
+  assert.deepEqual(directory.agents, [agent]);
+});
+
 test("directory invalidation uses opaque fingerprints and rereads only on change", async () => {
   const calls: string[] = [];
   let changed = false;

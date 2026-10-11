@@ -24,7 +24,8 @@ export class AgentDirectory {
   constructor(fetcher: typeof fetch = fetch) { this.fetcher = fetcher; }
   clear(): void { this.generation++; this.agents = []; this.revision = ""; }
   private async request(session: ConnectSession, suffix = "") {
-    const response = await this.fetcher(`${imBase}/api/v1/im/agents${suffix}`, {
+    const fetcher = this.fetcher;
+    const response = await fetcher(`${imBase}/api/v1/im/agents${suffix}`, {
       headers: { Authorization: session.jwt }, cache: "no-store", signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) throw new Error(`Agent directory ${response.status}`);
