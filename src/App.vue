@@ -399,6 +399,7 @@ function openAgent(agent: DirectoryAgent): void {
 // R1: on a phone the open chat covers the list, so a rail tap would filter a
 // list nobody can see. Close the chat there; desktop shows both side by side.
 function selectRail(mode: RailMode): void {
+  searchOpen.value = false;
   railMode.value = mode;
   if (window.matchMedia("(max-width: 720px)").matches) activeChannel.value = undefined;
 }
@@ -1477,11 +1478,11 @@ onBeforeUnmount(() => {
 
       <button
         class="rail-btn"
-        :class="{ active: railMode === 'all' }"
+        :class="{ active: !searchOpen && railMode === 'all' }"
         type="button"
         :title="t('list.all')"
         :aria-label="t('list.all')"
-        :aria-pressed="railMode === 'all'"
+        :aria-pressed="!searchOpen && railMode === 'all'"
         @click="selectRail('all')"
       >
         <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" /></svg>
@@ -1490,11 +1491,11 @@ onBeforeUnmount(() => {
       </button>
       <button
         class="rail-btn"
-        :class="{ active: railMode === 'groups' }"
+        :class="{ active: !searchOpen && railMode === 'groups' }"
         type="button"
         :title="t('list.groups')"
         :aria-label="t('list.groups')"
-        :aria-pressed="railMode === 'groups'"
+        :aria-pressed="!searchOpen && railMode === 'groups'"
         @click="selectRail('groups')"
       >
         <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
@@ -1504,11 +1505,11 @@ onBeforeUnmount(() => {
            has that a generic IM does not. -->
       <button
         class="rail-btn"
-        :class="{ active: railMode === 'agents' }"
+        :class="{ active: !searchOpen && railMode === 'agents' }"
         type="button"
         :title="t('list.agents')"
         :aria-label="t('list.agents')"
-        :aria-pressed="railMode === 'agents'"
+        :aria-pressed="!searchOpen && railMode === 'agents'"
         @click="selectRail('agents')"
       >
         <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2L4 7v10l8 5 8-5V7l-8-5z" /><path d="M12 22V12" /><path d="M4 7l8 5 8-5" /></svg>
@@ -1516,9 +1517,11 @@ onBeforeUnmount(() => {
       </button>
       <button
         class="rail-btn"
+        :class="{ active: searchOpen }"
         type="button"
         :title="t('list.searchPlaceholder')"
         :aria-label="t('list.searchPlaceholder')"
+        :aria-pressed="searchOpen"
         @click="focusSearch"
       >
         <svg class="rail-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></svg>

@@ -212,3 +212,4 @@ test("S2: a message hit opens the chat around that message (messagesync both way
   assert.match(app, /located: message\.messageSeq === locatedSeq/);
   assert.match(app, /@message="\(hit\) => openFromSearch\(hit\.channel, hit\.seq\)"/);
 });
+import "./search-return.checks.ts";
