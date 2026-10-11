@@ -63,3 +63,13 @@ test("event failure clears the fingerprint so recovery must reread the directory
   assert.equal(await directory.poll(session), true);
   assert.equal(directory.agents[0].name, "Recovered");
 });
+test("malformed or duplicate directory identities fail closed before rendering", async () => {
+  for (const rows of [[null], [{ ...agent, uid: -1 }], [{ ...agent, name: null }],
+    [{ ...agent, description: {} }], [{ ...agent, avatar: 2 }], [{ ...agent, revision: 3 }],
+    [agent, agent]]) {
+    const directory = new AgentDirectory(async () => response(rows));
+    await assert.rejects(directory.refresh(session), /Invalid agent directory/);
+    assert.deepEqual(directory.agents, []);
+    assert.equal(directory.revision, "");
+  }
+});

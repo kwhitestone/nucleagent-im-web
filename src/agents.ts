@@ -38,7 +38,20 @@ export class AgentDirectory {
       const result = await this.request(session);
       if (generation !== this.generation) return;
       if (!Array.isArray(result.data) || !result.revision) throw new Error("Invalid agent directory");
-      this.agents = result.data; this.revision = result.revision;
+      const seen = new Set<number>();
+      const agents: DirectoryAgent[] = result.data.map((agent: DirectoryAgent) => {
+        if (!agent || !Number.isSafeInteger(agent.uid) || agent.uid <= 0 || seen.has(agent.uid)
+          || typeof agent.name !== "string" || typeof agent.description !== "string"
+          || ["avatar", "revision", "effectiveSource", "modelRule", "promptRule", "overrideRule", "inFlightRule"]
+            .some(key => agent[key as keyof DirectoryAgent] !== undefined && typeof agent[key as keyof DirectoryAgent] !== "string")) {
+          throw new Error("Invalid agent directory");
+        }
+        seen.add(agent.uid);
+        return { uid: agent.uid, name: agent.name, description: agent.description,
+          ...Object.fromEntries(["avatar", "revision", "effectiveSource", "modelRule", "promptRule", "overrideRule", "inFlightRule"]
+            .filter(key => agent[key as keyof DirectoryAgent] !== undefined).map(key => [key, agent[key as keyof DirectoryAgent]])) };
+      });
+      this.agents = agents; this.revision = result.revision;
     } catch (error) {
       if (generation === this.generation) { this.agents = []; this.revision = ""; }
       throw error;

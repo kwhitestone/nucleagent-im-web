@@ -44,6 +44,18 @@ test("effective endpoint errors and invalid IDs fail closed", async () => {
   await assert.rejects(api.conversation(-1), /ID/);
   assert.equal(calls, 1);
 });
+test("IM UID lookup is owner-scoped and uses returned Core identifiers", async () => {
+  const paths: string[] = [];
+  const api = createEffectiveApi(async path => { paths.push(path); return ok(); });
+  const record = await api.uid(72);
+  assert.deepEqual(paths, ["/api/v1/addons/conversation/agent-uid/72/effective-definition"]);
+  assert.equal(record.definitionId, 4);
+  assert.equal(record.instanceId, 5);
+  for (const invalid of [0, -1, NaN, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    await assert.rejects(api.uid(invalid), /ID/);
+  }
+  assert.equal(paths.length, 1);
+});
 test("effective projection discards unexpected config and never guesses numeric revision or sources", async () => {
   const record = await createEffectiveApi(async () => ok({ ...data, config: { prompt: "private-fixture" },
     current: { ...materials, prompt: "private-fixture" } })).conversation(6);

@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { Settings2 } from "@lucide/vue";
+import { Settings2, Info } from "@lucide/vue";
 import AgentManagement from "./agent-definition/AgentManagement.vue";
+import AgentEffective from "./agent-definition/AgentEffective.vue";
+import { createEffectiveApi } from "./agent-definition/effective";
 import { createDefinitionApi } from "./agent-definition/api";
 import { sessionTransport } from "./agent-definition/transport";
 import { text as definitionText } from "./agent-definition/messages";
@@ -101,6 +103,8 @@ const session = ref<ConnectSession>();
 const managementOpen = ref(false);
 const canManageAgents = ref(false);
 const agentDefinitions = createDefinitionApi(sessionTransport(coreBase, () => session.value));
+const agentEffective = createEffectiveApi(sessionTransport(coreBase, () => session.value));
+const effectiveOpen = ref(false);
 const agentDirectory = new AgentDirectory();
 let directoryTimer: ReturnType<typeof setTimeout> | undefined;
 let directoryReading: ConnectSession | undefined;
@@ -170,6 +174,9 @@ const restoring = ref(!embedded && !isCallbackPath(window.location));
 const dialOpen = ref(false);
 const dialOpenId = ref("");
 const activeChannel = ref<Channel>();
+const activeAgentUid = computed(() => activeChannel.value?.channelType === ChannelTypePerson
+  ? directoryAgents.value.find(agent => String(agent.uid) === activeChannel.value?.channelID)?.uid : undefined);
+watch([activeChannel, session], () => { effectiveOpen.value = false; });
 let pendingConversationTarget: ConversationTarget | null = null;
 
 // UNI-T17: a deep link (e.g. from the library) to a DM the viewer is not in, or a
@@ -1909,6 +1916,11 @@ onBeforeUnmount(() => {
           </span>
         </div>
         <div class="chat-actions">
+          <button v-if="activeAgentUid" type="button" class="icon-button"
+            :title="getLocale() === 'zh' ? '有效定义' : 'Effective definition'"
+            :aria-label="getLocale() === 'zh' ? '有效定义' : 'Effective definition'"
+            :aria-expanded="effectiveOpen" aria-controls="im-agent-effective"
+            @click="effectiveOpen = !effectiveOpen"><Info :size="20" /></button>
           <span v-if="busy" class="busy-chip">
             <span class="blip" aria-hidden="true" />
             {{ t("chat.responding", { name: respondingAgent || t("badge.agent") }) }}
@@ -1928,6 +1940,9 @@ onBeforeUnmount(() => {
           >⋯</button>
         </div>
       </header>
+      <div v-if="activeAgentUid && effectiveOpen" id="im-agent-effective" class="agent-effective-panel">
+        <AgentEffective :key="`${session?.uid}:${activeAgentUid}`" :api="agentEffective" kind="uid" :id="activeAgentUid" />
+      </div>
 
       <!-- A brand-new account gets the three paths instead of an empty shrug. -->
       <EmptyPaths
@@ -2134,4 +2149,5 @@ onBeforeUnmount(() => {
   min-width: 0;
   overflow-y: auto;
 }
+.agent-effective-panel { padding: 0 16px; max-height: 45dvh; overflow-y: auto; min-height: 0; flex-shrink: 0; }
 </style>

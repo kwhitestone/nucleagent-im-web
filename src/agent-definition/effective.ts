@@ -56,6 +56,10 @@ export function createEffectiveApi(transport: Transport) {
       enabled: d.enabled, deleted: d.deleted, stale: d.stale, current: material(d.current), admitted: material(d.admitted) };
   }
   return {
+    async uid(agentUid: number) {
+      if (!id(agentUid)) throw new Error("Invalid agent UID");
+      return read(`/api/v1/addons/conversation/agent-uid/${agentUid}/effective-definition`);
+    },
     async instance(instanceId: number) {
       if (!id(instanceId)) throw new Error("Invalid instance ID");
       return read(`/api/v1/addons/conversation/agent-instances/${instanceId}/effective-definition`);

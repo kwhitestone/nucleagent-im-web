@@ -35,6 +35,12 @@ const fields = computed(() => [...new Set([...(record.value?.fieldPolicy.editabl
   !record.value?.fieldPolicy.protectedPaths.some(p => path === p || path.startsWith(`${p}/`))) ?? []);
 const value = (path: string) => Object.hasOwn(changes.value, path) ? changes.value[path] : readPath(record.value?.tool, path);
 const isJSON = (path: string) => path.startsWith("/config/mcp_config/input_schema/");
+function selectPropertyRule() {
+  const rules = record.value?.fieldPolicy.schemaPropertyRules ?? [];
+  if (!rules[propertyRule.value]) propertyRule.value = 0;
+  const keywords = rules[propertyRule.value]?.keywords ?? [];
+  if (!keywords.includes(propertyKeyword.value)) propertyKeyword.value = keywords[0] ?? "";
+}
 function change(path: string, event: Event) {
   if (locked.value || !record.value) return;
   const input = event.target as HTMLInputElement;
@@ -71,6 +77,7 @@ function accept(fresh: ToolDetail) {
     record.value = { ...record.value, capabilities: fresh.capabilities, fieldPolicy: fresh.fieldPolicy };
     current.value = fresh; error.value = "conflict";
   } else record.value = fresh;
+  selectPropertyRule();
 }
 async function refresh() {
   if (busy.value) return;
@@ -152,7 +159,7 @@ onUnmounted(() => {
         </label>
         <fieldset v-if="record.fieldPolicy.schemaPropertyRules?.length" :disabled="locked">
           <legend>{{ label('addParameter') }}</legend>
-          <label class="tool-field">{{ label('schema') }}<select v-model="propertyRule">
+          <label class="tool-field">{{ label('schema') }}<select v-model="propertyRule" @change="selectPropertyRule">
             <option v-for="(rule, index) in record.fieldPolicy.schemaPropertyRules" :key="rule.parentPath" :value="index">{{ rule.parentPath }}</option>
           </select></label>
           <label class="tool-field">{{ label('name') }}<input v-model="propertyName" maxlength="64" /></label>

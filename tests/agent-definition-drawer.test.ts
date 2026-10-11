@@ -3,6 +3,30 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { loadComponent, render } from "./render.ts";
 import { DefinitionError, type Detail } from "../src/agent-definition/api.ts";
+import { nextTick } from "vue";
+
+test("tool property selector follows the actual policy keywords after a refresh", async () => {
+  const originalDocument = globalThis.document;
+  globalThis.document = { activeElement: null } as unknown as Document;
+  const tool = await loadComponent("src/agent-definition/ToolEditor.vue") as { setup: Function };
+  const setup = tool.setup;
+  let bindings: any;
+  tool.setup = function (props: unknown, context: unknown) { bindings = setup(props, context); return bindings; };
+  const record = { tool: { id: 1 }, etag: '"tool-1-1"', capabilities: { read: true, write: true },
+    fieldPolicy: { editablePaths: [], protectedPaths: [], readOnlyPaths: [], unknownPaths: [], reasons: {},
+      schemaPropertyRules: [{ parentPath: "/schema", keywords: ["description"] }] } };
+  try {
+    await render(tool, { api: {}, id: 1 });
+    bindings.accept(record);
+    await nextTick();
+    assert.equal(bindings.propertyKeyword.value, "description");
+    bindings.propertyRule.value = 9;
+    bindings.accept({ ...record, etag: '"tool-1-2"' });
+    await nextTick();
+    assert.equal(bindings.propertyRule.value, 0);
+    assert.equal(bindings.propertyKeyword.value, "description");
+  } finally { tool.setup = setup; globalThis.document = originalDocument; }
+});
 
 test("IM management owns a viewport-height scroll container", () => {
   const app = readFileSync(new URL("../src/App.vue", import.meta.url), "utf8");

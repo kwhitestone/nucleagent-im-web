@@ -4,7 +4,7 @@ import { useI18n } from "vue-i18n";
 import { RefreshCw } from "@lucide/vue";
 import type { EffectiveApi, EffectiveDefinition, Source } from "./effective";
 
-const props = defineProps<{ api: EffectiveApi; kind: "instance" | "conversation"; id: number }>();
+const props = defineProps<{ api: EffectiveApi; kind: "uid" | "instance" | "conversation"; id: number }>();
 const { locale } = useI18n();
 const zh = computed(() => locale.value.startsWith("zh"));
 const words = computed(() => zh.value ? {
