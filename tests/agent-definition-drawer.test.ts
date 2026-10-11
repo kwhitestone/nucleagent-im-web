@@ -36,6 +36,34 @@ test("IM management owns a viewport-height scroll container", () => {
   assert.match(style, /min-width:\s*0/);
 });
 
+test("a conflict locks authorized fields without claiming their server permission was revoked", async () => {
+  const originalDocument = globalThis.document;
+  globalThis.document = { activeElement: null } as unknown as Document;
+  const drawer = await loadComponent("src/agent-definition/DefinitionDrawer.vue") as { setup: Function };
+  const setup = drawer.setup;
+  const detail = {
+    definition: { id: 1, name: "one", slug: "one", revision: "1", config: {}, isActive: false },
+    capabilities: { read: true, write: true },
+    fieldPolicy: { editablePaths: ["/name"], readOnlyPaths: [], protectedPaths: [], unknownPaths: [], reasons: {} },
+    identity: { uid: 7, status: "ready" }, effective: { revision: "one", definitionRevision: "1" },
+    skills: [], skillBindings: [], tools: [], etag: '"agent-1-1"',
+  } as Detail;
+  drawer.setup = function (props: unknown, context: unknown) {
+    const bindings = setup(props, context);
+    bindings.editor.change("/name", "mine");
+    bindings.editor.acceptRefresh({ ...detail, definition: { ...detail.definition, name: "other", revision: "2" }, etag: '"agent-1-2"' });
+    return bindings;
+  };
+  try {
+    const html = await render(drawer, { detail, api: {} }, "en");
+    assert.match(html, /id="definition-name"[^>]*readonly/);
+    const hint = html.match(/id="definition-name-hint"[^>]*>(.*?)<\/small>/s)?.[1];
+    assert.ok(hint);
+    assert.doesNotMatch(hint, /not granted write access/);
+    assert.match(html, /Compare and resolve each field/);
+  } finally { drawer.setup = setup; globalThis.document = originalDocument; }
+});
+
 test("lifecycle confirmation erases private fields when its authoritative detail read is forbidden", async () => {
   const originalDocument = globalThis.document;
   globalThis.document = { activeElement: null } as unknown as Document;

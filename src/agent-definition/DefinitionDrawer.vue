@@ -254,7 +254,7 @@ onUnmounted(() => {
         </template>
         <template v-if="tab === 'fields'">
           <p v-if="catalogError" role="status">{{ label('catalogError') }}</p>
-          <DefinitionFields :baseline="record.definition" :changes="editor.changes" :editable-paths="writable ? record.fieldPolicy.editablePaths : []"
+          <DefinitionFields :baseline="record.definition" :changes="editor.changes" :editable-paths="record.capabilities.write && !editor.denied ? record.fieldPolicy.editablePaths : []"
             :readonly-fields="readonlyFields" :backends="backends.map(item => ({ value: item.id, label: item.displayName }))"
             :providers="providerChoices" :models="modelChoices" :busy="locked" @change="change" />
         </template>
