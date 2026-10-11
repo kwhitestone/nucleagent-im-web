@@ -1,0 +1,17 @@
+.definition-drawer { box-sizing: border-box; position: fixed; inset: 0 0 0 auto; margin: 0; width: min(760px, 94vw); max-width: 100%; height: 100dvh; max-height: 100dvh; padding: 0; border: 0; border-left: 1px solid var(--border); background: var(--bg-card, Canvas); color: var(--text-primary, CanvasText); }
+.definition-drawer[open] { display: flex; flex-direction: column; }
+::backdrop { background: #0006; }
+header, footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 24px; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+h2 { min-width: 0; font-size: 20px; margin: 0; overflow-wrap: anywhere; } h3 { font-size: 16px; }
+footer { border-top: 1px solid var(--border); border-bottom: 0; }
+.drawer-body { padding: 20px 24px; overflow: auto; min-height: 0; flex: 1; }
+button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; border: 1px solid var(--border); border-radius: 4px; padding: 8px 12px; background: var(--bg-card, Canvas); color: inherit; font: inherit; cursor: pointer; }
+button:disabled { opacity: .5; cursor: not-allowed; } button.primary { background: var(--accent, #16796c); color: white; }
+.icon { width: 44px; flex-shrink: 0; padding: 8px; }
+:focus-visible { outline: 2px solid var(--accent, #16796c); outline-offset: 2px; }
+input, textarea { box-sizing: border-box; color: inherit; background: var(--bg-card, Canvas); border: 1px solid var(--border); font: inherit; padding: 8px; min-height: 44px; width: 100%; }
+input[type=checkbox] { width: 22px; min-height: 22px; height: 22px; accent-color: var(--accent, #16796c); flex-shrink: 0; }
+.check { display: flex; align-items: center; gap: 10px; min-height: 48px; }
+fieldset { min-width: 0; margin-top: 24px; }
+pre, code { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 600px) { .definition-drawer { width: 100%; } header, footer, .drawer-body { padding: 14px 16px; } input, textarea { font-size: 16px !important; } }

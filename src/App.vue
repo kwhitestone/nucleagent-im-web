@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { Settings2 } from "@lucide/vue";
+import AgentManagement from "./agent-definition/AgentManagement.vue";
+import { createDefinitionApi } from "./agent-definition/api";
+import { sessionTransport } from "./agent-definition/transport";
+import { text as definitionText } from "./agent-definition/messages";
 import {
   Channel,
   ChannelTypeGroup,
@@ -24,6 +29,7 @@ import {
   createSession,
   getGroupMembers,
   imBase,
+  coreBase,
   imSession,
   listGroups,
   provisionAddress,
@@ -57,7 +63,7 @@ import {
   loadCachedProfile,
   saveCachedProfile,
 } from "./profile";
-import { accountTypeOf, avatarFailed, avatarSrc, ensureNames, handleFor, isEnterprise, isMissing, nameFor, openIdOf, resetNames } from "./names";
+import { accountTypeOf, avatarFailed, avatarSrc, ensureNames, handleFor, isEnterprise, isMissing, nameFor, openIdOf, resetNames, setAgentProjection } from "./names";
 import SearchPanel from "./components/SearchPanel.vue";
 import GroupDialog from "./components/GroupDialog.vue";
 import RowAvatar from "./components/RowAvatar.vue";
@@ -69,7 +75,7 @@ import SystemLine from "./components/SystemLine.vue";
 import { configureSDK, loadMoreConversations, markRead, reconcileAckedConversation, sendAcked } from "./im";
 import { channelKey, useConversationBatch } from "./hiding";
 import { carryPersisted, earlierCursor, mergeMessages, messageKey, remintGuard } from "./history";
-import { listAgents, uncontactedAgents, type DirectoryAgent } from "./agents";
+import { AgentDirectory, uncontactedAgents, type DirectoryAgent } from "./agents";
 import { buildOutgoingText } from "./mentions";
 import { recipientDisabledKey, sendToEnabledRecipient } from "./send";
 import { isAgentRelayed, readProvenance, rejectionCopy } from "./provenance";
@@ -92,6 +98,49 @@ const password = ref("");
 const loginError = ref("");
 const loggingIn = ref(false);
 const session = ref<ConnectSession>();
+const managementOpen = ref(false);
+const canManageAgents = ref(false);
+const agentDefinitions = createDefinitionApi(sessionTransport(coreBase, () => session.value));
+const agentDirectory = new AgentDirectory();
+let directoryTimer: ReturnType<typeof setTimeout> | undefined;
+let directoryReading: ConnectSession | undefined;
+let directoryEpoch = 0;
+const directoryError = ref(false);
+async function readAgentCapabilities() {
+  const current = session.value;
+  if (!current) return;
+  try {
+    const catalog = await agentDefinitions.catalog();
+    if (session.value === current) canManageAgents.value = catalog.capabilities.read === true;
+  } catch { if (session.value === current) canManageAgents.value = false; }
+}
+async function refreshAgentPresentation(poll = false) {
+  const current = session.value;
+  if (!current || directoryReading === current) return;
+  directoryReading = current;
+  try {
+    if (poll && !await agentDirectory.poll(current)) return;
+    if (!poll) await agentDirectory.refresh(current);
+    if (session.value !== current) return;
+    directoryAgents.value = agentDirectory.agents;
+    directoryError.value = false;
+    await ensureNames(visibleUids.value, current, true);
+    if (session.value !== current) return;
+    setAgentProjection(directoryAgents.value);
+    if (activeGroup.value) await loadActiveGroupMembers(activeGroup.value, viewGeneration);
+  } catch {
+    if (session.value === current) { directoryAgents.value = []; setAgentProjection([]); directoryError.value = true; }
+  } finally { if (directoryReading === current) directoryReading = undefined; }
+}
+async function pollAgentDirectory(epoch = directoryEpoch) {
+  if (document.visibilityState === "visible") await refreshAgentPresentation(true);
+  if (session.value && epoch === directoryEpoch) directoryTimer = setTimeout(() => pollAgentDirectory(epoch), 2000);
+}
+function rereadAgentDirectory() {
+  if (document.visibilityState !== "hidden" && session.value) {
+    void refreshAgentPresentation(); void readAgentCapabilities();
+  }
+}
 // Connection state is a key, not a sentence. It used to hold the English label
 // itself, which both drove `sendMessage`'s guard and rendered in the header —
 // translating it in place would have silently broken the guard.
@@ -335,10 +384,14 @@ function onVisible(): void {
   if (document.visibilityState === "visible" && session.value && connection.value === "connected") {
     void syncConversations();
     void batch.refreshHidden();
+    void refreshAgentPresentation();
+    void readAgentCapabilities();
   }
 }
 document.addEventListener("keydown", onKeydown);
 document.addEventListener("visibilitychange", onVisible);
+window.addEventListener("focus", rereadAgentDirectory);
+window.addEventListener("online", rereadAgentDirectory);
 
 /** UIDs of every agent this account has seen, so the rail can filter by them. */
 const knownAgentUids = computed(
@@ -634,6 +687,8 @@ const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
     remint.reset();
     void Promise.all([syncConversations(), syncGroups(), refreshActiveHistory(), batch.refreshHidden()]);
     void openPendingConversation();
+    void refreshAgentPresentation();
+    void readAgentCapabilities();
   } else if (status === ConnectStatus.Connecting) {
     connection.value = "connecting";
   } else if (status === ConnectStatus.ConnectFail && reasonCode === 2) {
@@ -737,9 +792,11 @@ function startSession(nextSession: ConnectSession): void {
   // raw UIDs. Reading it here (not at module scope) keeps one account's names out of
   // another's session when the shell swaps users without a sign-out.
   knownContacts.value = loadCachedContacts(nextSession.uid);
-  void listAgents(nextSession).then((agents) => {
-    if (session.value?.uid === nextSession.uid) directoryAgents.value = agents;
-  });
+  void refreshAgentPresentation();
+  clearTimeout(directoryTimer);
+  const epoch = ++directoryEpoch;
+  directoryTimer = setTimeout(() => pollAgentDirectory(epoch), 2000);
+  void readAgentCapabilities();
   const sdk = configureSDK(nextSession);
   installListeners();
   connection.value = "connecting";
@@ -1350,9 +1407,16 @@ function teardownSession(): void {
   WKSDK.shared().disconnect();
   WKSDK.shared().conversationManager.openConversation = undefined;
   session.value = undefined;
+  managementOpen.value = false;
+  canManageAgents.value = false;
   conversations.value = [];
   groups.value = [];
   directoryAgents.value = [];
+  agentDirectory.clear();
+  directoryEpoch++;
+  directoryReading = undefined;
+  directoryError.value = false;
+  clearTimeout(directoryTimer);
   knownContacts.value = [];
   resetNames();
   batch.reset();
@@ -1402,6 +1466,8 @@ onBeforeUnmount(() => {
   shellBridge.dispose();
   document.removeEventListener("keydown", onKeydown);
   document.removeEventListener("visibilitychange", onVisible);
+  window.removeEventListener("focus", rereadAgentDirectory);
+  window.removeEventListener("online", rereadAgentDirectory);
   clearTimeout(pressTimer);
   clearTimeout(locateTimer);
   teardownSession();
@@ -1472,6 +1538,10 @@ onBeforeUnmount(() => {
        own AppSidebar anatomy (brand / nav / list / user slot) split across two
        columns, so the mental model carries over between them. -->
   <!-- Phones: the open chat covers the sidebar, except while the search page (which lives there) is open. -->
+  <main v-else-if="managementOpen" class="agent-management-page">
+    <AgentManagement :key="session.uid" :api="agentDefinitions" closable
+      @close="managementOpen = false" @invalidated="refreshAgentPresentation()" />
+  </main>
   <main v-else class="app-shell" :class="{ 'show-chat': activeChannel && !searchOpen }">
     <nav class="rail" :aria-label="t('app.title')">
       <span class="rail-brand" :title="t('app.title')">N</span>
@@ -1547,6 +1617,9 @@ onBeforeUnmount(() => {
           <strong>{{ railMode === "all" ? t("list.all") : railMode === "groups" ? t("list.groups") : t("list.agents") }}</strong>
           <span :class="{ online: connection === 'connected' }">{{ t(`conn.${connection}`) }}</span>
         </div>
+        <button v-if="canManageAgents" type="button" class="icon-button" data-testid="im-agent-management"
+          :title="definitionText('title', getLocale())" :aria-label="definitionText('title', getLocale())"
+          @click="managementOpen = true"><Settings2 :size="20" /></button>
         <!-- Phones (board §05): healthy = an 8px dot by the title; trouble gets the bar below. -->
         <i
           class="conn-dot"
@@ -1685,6 +1758,7 @@ onBeforeUnmount(() => {
       />
 
       <nav class="conversation-list" v-show="!hiddenOpen && !searchOpen" :aria-label="t('list.all')" @scroll.passive="conversationListScrolled">
+        <p v-if="directoryError && railMode === 'agents'" role="status" class="empty-list">{{ definitionText('directoryError', getLocale()) }}</p>
         <div
           v-for="conversation in visibleConversations"
           :key="channelKey(conversation.channel)"
@@ -2052,3 +2126,12 @@ onBeforeUnmount(() => {
     </p>
   </main>
 </template>
+
+<style scoped>
+.agent-management-page {
+  height: 100vh;
+  height: 100dvh;
+  min-width: 0;
+  overflow-y: auto;
+}
+</style>

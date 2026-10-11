@@ -9,6 +9,11 @@ import { isPlaceholderName } from "./profile.ts";
 
 // null = resolved, and no account has this uid.
 const known = reactive(new Map<string, ResolvedProfile | null>());
+const agentProjection = reactive(new Map<string, { name: string; avatar?: string }>());
+export function setAgentProjection(agents: { uid: number; name: string; avatar?: string }[]): void {
+  agentProjection.clear();
+  for (const agent of agents) agentProjection.set(String(agent.uid), agent);
+}
 const pending = new Set<string>();
 const failed = new Set<string>();
 let owner = "";
@@ -23,6 +28,7 @@ export function isRealName(name: string | undefined): name is string {
 
 /** The resolved nickName, else the first real stored name, else "" (= skeleton). */
 export function nameFor(uid: string, ...stored: Array<string | undefined>): string {
+  if (agentProjection.has(uid)) return agentProjection.get(uid)!.name;
   const resolved = known.get(uid)?.nickName?.trim();
   if (resolved) return resolved;
   return stored.find(isRealName)?.trim() ?? "";
@@ -46,6 +52,7 @@ export function handleFor(uid: string, stored?: string): string {
 
 /** The resolved avatar URL, else a stored one (e.g. a group member row); "" = no avatar (initials fallback). */
 export function avatarFor(uid: string, stored?: string): string {
+  if (agentProjection.has(uid)) return (agentProjection.get(uid)!.avatar ?? "").trim();
   const resolved = known.get(uid)?.avatar;
   return (resolved || stored || "").trim();
 }
@@ -106,6 +113,7 @@ export function phoneMaskedOf(uid: string): string | null | undefined {
 
 /** Sign-out / account switch: one account's names never render in another's session. */
 export function resetNames(): void {
+  agentProjection.clear();
   known.clear();
   pending.clear();
   failed.clear();

@@ -13,6 +13,7 @@ WORKDIR /build
 # Vite inlines these values at build time.
 ARG VITE_AUTH_BASE
 ARG VITE_IM_BASE
+ARG VITE_CORE_BASE
 # The nucleagent-web shell origin. Embedded mode accepts session pushes from
 # this exact origin only (src/shell.ts), and nginx allows framing only from it.
 ARG VITE_SHELL_URL
@@ -26,9 +27,10 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
 COPY . .
-RUN test -n "${VITE_AUTH_BASE}" && test -n "${VITE_IM_BASE}" && test -n "${VITE_SHELL_URL}" && \
+RUN test -n "${VITE_AUTH_BASE}" && test -n "${VITE_IM_BASE}" && test -n "${VITE_CORE_BASE}" && test -n "${VITE_SHELL_URL}" && \
     VITE_AUTH_BASE="${VITE_AUTH_BASE}" \
     VITE_IM_BASE="${VITE_IM_BASE}" \
+    VITE_CORE_BASE="${VITE_CORE_BASE}" \
     VITE_SHELL_URL="${VITE_SHELL_URL}" \
     VITE_SHELL_ALLOWED_ORIGINS="${VITE_SHELL_ALLOWED_ORIGINS}" \
     VITE_ACCOUNT_UI_URL="${VITE_ACCOUNT_UI_URL}" \

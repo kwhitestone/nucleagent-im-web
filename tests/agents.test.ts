@@ -9,21 +9,21 @@ const session = { uid: "1", token: "t", wsAddr: "ws://x", jwt: "j" };
 const hr: DirectoryAgent = { uid: 50, name: "HR helper", description: "Answers leave and payroll questions" };
 const ops: DirectoryAgent = { uid: 51, name: "Ops bot", description: "" };
 
-test("listAgents: GET /api/v1/im/agents with the session; any failure is an empty directory", async () => {
+test("listAgents: GET /api/v1/im/agents with the session; unavailable directory is explicit", async () => {
   const original = globalThis.fetch;
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   try {
     globalThis.fetch = async (url, init) => {
       calls.push({ url: String(url), init });
-      return new Response(JSON.stringify({ code: 0, data: [hr] }), { status: 200 });
+      return new Response(JSON.stringify({ code: 0, data: [hr] }), { status: 200, headers: { "X-IM-Directory-Revision": "opaque" } });
     };
     assert.deepEqual(await listAgents(session), [hr]);
     assert.match(calls[0].url, /\/api\/v1\/im\/agents$/);
     assert.deepEqual(calls[0].init?.headers, { Authorization: "j" });
     globalThis.fetch = async () => new Response("404 page not found", { status: 404 });
-    assert.deepEqual(await listAgents(session), [], "older im without the route");
+    await assert.rejects(listAgents(session), /404/);
     globalThis.fetch = async () => { throw new TypeError("network"); };
-    assert.deepEqual(await listAgents(session), []);
+    await assert.rejects(listAgents(session), /network/);
   } finally {
     globalThis.fetch = original;
   }
@@ -66,7 +66,9 @@ test("search: matching agents get their own section above people, and choosing o
 const app = readFileSync("src/App.vue", "utf8");
 
 test("App: the directory loads per session and feeds the Agents tab, agent tagging and search", () => {
-  assert.match(app, /listAgents\(nextSession\)\.then\(\(agents\) => \{\s*if \(session\.value\?\.uid === nextSession\.uid\) directoryAgents\.value = agents;/);
+  assert.match(app, /session\.value !== current/);
+  assert.match(app, /directoryAgents\.value = agentDirectory\.agents/);
+  assert.match(app, /epoch === directoryEpoch\) directoryTimer = setTimeout\(\(\) => pollAgentDirectory\(epoch\), 2000\)/);
   assert.match(app, /directoryAgents\.value = \[\];/, "teardown drops one account's directory");
   assert.match(app, /\.\.\.directoryAgents\.value\.map\(\(agent\) => String\(agent\.uid\)\)/, "directory uids count as agents");
   assert.match(app, /const unopenedAgents = computed\(\(\) => railMode\.value !== "agents" \? \[\] : uncontactedAgents\(/);

@@ -7,17 +7,63 @@ export interface DirectoryAgent {
   uid: number;
   name: string;
   description: string;
+  avatar?: string;
+  revision?: string;
+  effectiveSource?: string;
+  modelRule?: string;
+  promptRule?: string;
+  overrideRule?: string;
+  inFlightRule?: string;
 }
 
-/** Fetched once per session. Any failure (older im without the route, network) is an empty directory, never an error. */
-export async function listAgents(session: ConnectSession): Promise<DirectoryAgent[]> {
-  try {
-    const response = await fetch(`${imBase}/api/v1/im/agents`, { headers: { Authorization: session.jwt } });
-    const body = await response.json() as { code?: number; data?: DirectoryAgent[] };
-    return response.ok && body.code === 0 && Array.isArray(body.data) ? body.data : [];
-  } catch {
-    return [];
+export class AgentDirectory {
+  agents: DirectoryAgent[] = [];
+  revision = "";
+  private generation = 0;
+  private fetcher: typeof fetch;
+  constructor(fetcher: typeof fetch = fetch) { this.fetcher = fetcher; }
+  clear(): void { this.generation++; this.agents = []; this.revision = ""; }
+  private async request(session: ConnectSession, suffix = "") {
+    const response = await this.fetcher(`${imBase}/api/v1/im/agents${suffix}`, {
+      headers: { Authorization: session.jwt }, cache: "no-store", signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) throw new Error(`Agent directory ${response.status}`);
+    const body = await response.json();
+    if (body?.code !== 0) throw new Error("Invalid agent directory");
+    return { data: body.data, revision: response.headers.get("X-IM-Directory-Revision") };
   }
+  async refresh(session: ConnectSession): Promise<void> {
+    const generation = ++this.generation;
+    try {
+      const result = await this.request(session);
+      if (generation !== this.generation) return;
+      if (!Array.isArray(result.data) || !result.revision) throw new Error("Invalid agent directory");
+      this.agents = result.data; this.revision = result.revision;
+    } catch (error) {
+      if (generation === this.generation) { this.agents = []; this.revision = ""; }
+      throw error;
+    }
+  }
+  async poll(session: ConnectSession): Promise<boolean> {
+    if (!this.revision) { await this.refresh(session); return true; }
+    const generation = this.generation;
+    try {
+      const result = await this.request(session, `/events?${new URLSearchParams({ after: this.revision })}`);
+      if (generation !== this.generation) return false;
+      if (typeof result.data?.changed !== "boolean" || typeof result.data.revision !== "string") throw new Error("Invalid directory event");
+      if (result.data.changed || result.data.revision !== this.revision) { await this.refresh(session); return true; }
+      return false;
+    } catch (error) {
+      if (generation === this.generation) this.clear();
+      throw error;
+    }
+  }
+}
+
+export async function listAgents(session: ConnectSession): Promise<DirectoryAgent[]> {
+  const directory = new AgentDirectory();
+  await directory.refresh(session);
+  return directory.agents;
 }
 
 /** Search: name, resolved nickName or description contains the query (case-insensitive). */

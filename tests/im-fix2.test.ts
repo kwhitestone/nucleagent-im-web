@@ -53,6 +53,7 @@ function harness(visibleAfter = 3791, fail = false) {
     hasMoreConversations: { value: true }, loadingConversations: { value: false },
     viewGeneration: 0, document: { visibilityState: "visible" },
     batch: { refreshHidden() {} }, syncGroups() {}, refreshActiveHistory() {},
+    refreshAgentPresentation() {}, readAgentCapabilities() {},
     channelKey: (c: Channel) => `${c.channelType}:${c.channelID}`,
     buildOutgoingText: (text: string) => new MessageText(text),
     sendToEnabledRecipient: async (_c: unknown, _s: unknown, _current: unknown, send: () => Promise<void>) => {
