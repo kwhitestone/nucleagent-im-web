@@ -122,6 +122,8 @@ export function configureSDK(session: ConnectSession): WKSDK {
     syncedUid = session.uid;
     loadedPages = 1;
     conversationCursor = "";
+    listedChannels = new Set();
+    reconciling = new Map();
   }
   config.provider.syncConversationsCallback = () => {
     syncing ??= (async () => {
@@ -147,6 +149,9 @@ export function configureSDK(session: ConnectSession): WKSDK {
 let syncedUid = "";
 let loadedPages = 1;
 let syncing: Promise<Conversation[]> | undefined;
+let listedChannels = new Set<string>();
+let reconciling = new Map<string, Promise<Conversation | undefined>>();
+const conversationKey = (channel: Channel) => `${channel.channelType}:${channel.channelID}`;
 
 /** The cursor for the next conversation page; "" once the list is exhausted. */
 export let conversationCursor = "";
@@ -160,12 +165,17 @@ export interface ConversationPage {
  * One page of the cursor-paged conversation list (UNI-IM-DB W4: default 50, newest first).
  * hidden: the caller's hidden conversations instead (IM3-D4, Q3 §2).
  */
-export async function loadConversationPage(session: ConnectSession, cursor = "", hidden = false): Promise<ConversationPage> {
+export async function loadConversationPage(session: ConnectSession, cursor = "", hidden = false, signal?: AbortSignal): Promise<ConversationPage> {
+  const listed = listedChannels;
   const body: Row = hidden ? { hidden: true } : {};
   if (cursor) body.cursor = cursor;
-  const result = await postIM<Row>("/api/v1/im/conversation/list", body, session);
+  const result = await postIM<Row>("/api/v1/im/conversation/list", body, session, signal);
+  const conversations = rows(result, "conversations").map(conversationFromRow);
+  if (!hidden && session.uid === syncedUid && listed === listedChannels) {
+    for (const conversation of conversations) listed.add(conversationKey(conversation.channel));
+  }
   return {
-    conversations: rows(result, "conversations").map(conversationFromRow),
+    conversations,
     nextCursor: result && !result.done ? String(result.next_cursor || "") : "",
   };
 }
@@ -178,6 +188,38 @@ export async function loadMoreConversations(session: ConnectSession): Promise<Co
   conversationCursor = page.nextCursor;
   loadedPages++;
   return page.conversations;
+}
+
+/**
+ * SENDACK precedes the list projection. Only new/unconfirmed rows need this bounded read;
+ * the SDK's optimistic conversation is not proof that a fresh tab can list it.
+ */
+export function reconcileAckedConversation(channel: Channel, session: ConnectSession): Promise<Conversation | undefined> {
+  const key = conversationKey(channel);
+  const listed = listedChannels;
+  if (session.uid !== syncedUid || listed.has(key)) return Promise.resolve(undefined);
+  const pending = reconciling;
+  const existing = pending.get(key);
+  if (existing) return existing;
+  const current = () => listed === listedChannels && session.uid === syncedUid;
+  const work = (async () => {
+    for (const wait of [0, 500, 1500]) {
+      if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+      if (!current() || listed.has(key)) return;
+      try {
+        // A head-page probe must not reset the loaded-page cursor or replace the list.
+        const page = await loadConversationPage(session, "", false, AbortSignal.timeout(1500));
+        if (!current()) return;
+        const found = page.conversations.find((item) => item.channel.isEqual(channel));
+        if (found) return found;
+      } catch {
+        console.warn("im_ack_list_read_failed");
+      }
+    }
+    console.warn("im_ack_list_not_visible");
+  })().finally(() => { pending.delete(key); });
+  pending.set(key, work);
+  return work;
 }
 
 /**

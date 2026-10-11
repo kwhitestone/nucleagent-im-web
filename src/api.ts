@@ -187,9 +187,11 @@ export async function postIM<T>(
   path: string,
   body: Record<string, unknown>,
   session: ConnectSession,
+  signal?: AbortSignal,
 ): Promise<T> {
   const response = await fetch(`${imBase}${path}`, {
     method: "POST",
+    signal,
     headers: {
       Authorization: session.jwt,
       "Content-Type": "application/json",

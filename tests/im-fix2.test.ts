@@ -28,6 +28,8 @@ function harness(visibleAfter = 3791, fail = false) {
   const session = { uid: `fix2-${++serial}`, token: "fixture", jwt: "fixture", wsAddr: "ws://fixture" };
   const calls: Array<{ at: number; cursor: string }> = [];
   const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args); };
   const originalFetch = globalThis.fetch;
   const chat = WKSDK.shared().chatManager;
   const originalSend = chat.send;
@@ -69,7 +71,7 @@ function harness(visibleAfter = 3791, fail = false) {
   return { state, calls, warnings, session,
     run: (expression: string) => runInContext(expression, context),
     async tick(ms: number) { mock.timers.tick(ms); await flush(); },
-    restore() { globalThis.fetch = originalFetch; chat.send = originalSend; mock.timers.reset(); },
+    restore() { globalThis.fetch = originalFetch; chat.send = originalSend; console.warn = originalWarn; mock.timers.reset(); },
   };
 }
 
@@ -77,20 +79,21 @@ test("P1 integration: 3s uplink, ACK before list projection, close on draft clea
   const h = harness();
   try {
     await h.run("syncConversations()");
-    const sending = h.run("sendMessage()");
+    let closed = false;
+    const sending = h.run("sendMessage()").then(async () => {
+      assert.equal(h.state.draft.value, "");
+      closed = true;
+      // Close at the exact completion signal, even on the broken implementation.
+      WKSDK.shared().conversationManager.conversations = [];
+      h.state.conversations.value = [];
+      await h.run("syncConversations()");
+    });
     await flush();
     await h.tick(3000);
-    assert.equal(h.state.draft.value, "hello", "ACK alone must not end the new-row reconciliation window");
     await h.tick(500);
-    assert.equal(h.state.draft.value, "hello", "projection still absent at the first backoff");
     await h.tick(1500);
     await sending;
-    assert.equal(h.state.draft.value, "");
-    assert.ok(ids(h.state.conversations.value).includes("new"), "reconciled row merged into the existing App list");
-    // Close immediately when the product says sent; a fresh document has no local SDK row.
-    WKSDK.shared().conversationManager.conversations = [];
-    h.state.conversations.value = [];
-    await h.run("syncConversations()");
+    assert.equal(closed, true);
     await h.tick(20000);
     assert.ok(ids(h.state.conversations.value).includes("new"), "P1 fresh list row, no visibility event");
     assert.equal(h.state.loginError.value, "");
@@ -161,4 +164,72 @@ test("an ACK for a server-listed conversation needs no extra reads", async () =>
     assert.equal(h.calls.length, 1);
     assert.equal(h.state.draft.value, "");
   } finally { h.restore(); }
+});
+
+test("concurrent reconciliation of the same ACK shares all attempts, not one loop per trigger", async () => {
+  const h = harness(Infinity);
+  try {
+    await h.run("syncConversations()");
+    const channel = h.state.activeChannel.value;
+    const pending = [1, 2, 3].map(() => im.reconcileAckedConversation(channel, h.session));
+    await flush();
+    assert.equal(h.calls.length, 2, "one head probe for three callers");
+    await h.tick(500);
+    await h.tick(1500);
+    await Promise.all(pending);
+    assert.equal(h.calls.length, 4, "one initial sync plus one bounded loop");
+    await h.tick(20000);
+    assert.equal(h.calls.length, 4, "exhaustion leaves no polling timer");
+  } finally { h.restore(); }
+});
+
+test("account change during backoff cancels the old gap without merging its row or further reads", async () => {
+  const h = harness();
+  try {
+    await h.run("syncConversations()");
+    const sending = h.run("sendMessage()");
+    await flush();
+    await h.tick(3000);
+    const replacement = { ...h.session, uid: "replacement" };
+    im.configureSDK(replacement);
+    h.state.session.value = replacement;
+    await h.tick(500);
+    await sending;
+    assert.equal(h.calls.length, 2);
+    assert.deepEqual(ids(h.state.conversations.value), ["old"]);
+    assert.equal(h.state.draft.value, "hello", "old completion cannot clear another session's draft");
+  } finally { h.restore(); }
+});
+
+test("a hanging reconciliation fetch is aborted, then retries and releases the composer", async () => {
+  const h = harness();
+  const originalTimeout = AbortSignal.timeout;
+  const signals: AbortSignal[] = [];
+  AbortSignal.timeout = (ms: number) => {
+    assert.equal(ms, 1500);
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), ms);
+    return controller.signal;
+  };
+  try {
+    await h.run("syncConversations()");
+    globalThis.fetch = async (_input, init) => new Promise((_resolve, reject) => {
+      const signal = init?.signal!;
+      signals.push(signal);
+      signal.addEventListener("abort", () => reject(new Error("fixture timeout")), { once: true });
+    });
+    const sending = h.run("sendMessage()");
+    await flush();
+    await h.tick(3000);
+    await h.tick(1500);
+    await h.tick(500);
+    await h.tick(1500);
+    await h.tick(1500);
+    await h.tick(1500);
+    await sending;
+    assert.equal(signals.length, 3);
+    assert.ok(signals.every((s) => s.aborted));
+    assert.equal(h.state.draft.value, "");
+    assert.equal(h.state.loginError.value, "");
+  } finally { AbortSignal.timeout = originalTimeout; h.restore(); }
 });

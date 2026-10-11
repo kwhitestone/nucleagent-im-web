@@ -66,7 +66,7 @@ import { profileActions, profileParams, useAccountPopover, type ProfileTarget } 
 import { getLocale } from "./i18n";
 import EmptyPaths from "./components/EmptyPaths.vue";
 import SystemLine from "./components/SystemLine.vue";
-import { configureSDK, loadMoreConversations, markRead, sendAcked } from "./im";
+import { configureSDK, loadMoreConversations, markRead, reconcileAckedConversation, sendAcked } from "./im";
 import { channelKey, useConversationBatch } from "./hiding";
 import { carryPersisted, earlierCursor, mergeMessages, messageKey, remintGuard } from "./history";
 import { listAgents, uncontactedAgents, type DirectoryAgent } from "./agents";
@@ -904,6 +904,15 @@ async function syncConversations(): Promise<void> {
 }
 
 // Q3: the list is cursor-paged (50 per page). Scrolling near the bottom loads the next page.
+function mergeConversationPage(page: Conversation[]): void {
+  const known = new Set(conversations.value.map((item) => channelKey(item.channel)));
+  const fresh = page.filter((item) => !known.has(channelKey(item.channel)));
+  conversations.value = [...conversations.value, ...fresh];
+  const sdk = WKSDK.shared().conversationManager;
+  const sdkKnown = new Set(sdk.conversations.map((item) => channelKey(item.channel)));
+  sdk.conversations = [...sdk.conversations, ...page.filter((item) => !sdkKnown.has(channelKey(item.channel)))];
+}
+
 async function loadMoreConversationPage(): Promise<void> {
   const pageSession = session.value;
   if (!pageSession || loadingConversations.value || !hasMoreConversations.value) return;
@@ -912,11 +921,7 @@ async function loadMoreConversationPage(): Promise<void> {
     const page = await loadMoreConversations(pageSession);
     if (session.value !== pageSession) return;
     hasMoreConversations.value = page.length > 0;
-    const known = new Set(conversations.value.map((item) => channelKey(item.channel)));
-    const fresh = page.filter((item) => !known.has(channelKey(item.channel)));
-    conversations.value = [...conversations.value, ...fresh];
-    const sdk = WKSDK.shared().conversationManager;
-    sdk.conversations = [...sdk.conversations, ...fresh];
+    mergeConversationPage(page);
   } catch (error) {
     loginError.value = error instanceof Error ? error.message : t("chat.errConversations");
   } finally {
@@ -1214,6 +1219,9 @@ async function sendMessage(): Promise<void> {
       const content = buildOutgoingText(text, channel.channelType, mentionUids);
       // The SDK shows it at once (message listener); the draft goes only once it is on the server.
       const message = await sendAcked(content, channel);
+      // Finish the bounded projection check before "sent" lets the user close this tab.
+      const conversation = await reconcileAckedConversation(channel, sendSession);
+      if (session.value === sendSession && conversation) mergeConversationPage([conversation]);
       if (!current()) return;
       draft.value = "";
       mentionedAgentUids.value = [];
