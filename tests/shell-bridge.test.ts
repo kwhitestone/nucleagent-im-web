@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { installShellBridge, isInShell, parseShellAuth, shellAccountUrl } from "../src/shell.ts";
+import { runtimeFixture } from "./fixtures/runtimeConfig.ts";
 
-const shellOrigin = "http://localhost:26600";
+const shellOrigin = runtimeFixture().VITE_SHELL_URL;
 const token = "access-token";
 
 function authPayload(overrides: Record<string, unknown> = {}) {

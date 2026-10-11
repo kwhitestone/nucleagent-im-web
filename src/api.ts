@@ -1,7 +1,8 @@
-import { outerAware } from "./outerHost.ts";
-export const authBase = trimBase(outerAware(import.meta.env?.VITE_AUTH_BASE || "http://127.0.0.1:26670"));
-export const imBase = trimBase(outerAware(import.meta.env?.VITE_IM_BASE || "http://127.0.0.1:26655"));
-export const coreBase = trimBase(outerAware(import.meta.env?.VITE_CORE_BASE || ""));
+import { configValue } from "./runtimeConfig.ts";
+// Runtime config is loaded (and outer-mapped) by boot.ts before this module evaluates.
+export const authBase = configValue("VITE_AUTH_BASE");
+export const imBase = configValue("VITE_IM_BASE");
+export const coreBase = configValue("VITE_CORE_BASE");
 export const minContactQueryLength = 2;
 
 export interface ConnectSession {
@@ -60,10 +61,6 @@ export interface AgentAllowlist {
   ownerUid: number;
   ownerImplicit: boolean;
   memberUids: number[];
-}
-
-function trimBase(value: string): string {
-  return value.replace(/\/+$/, "");
 }
 
 async function readJson(response: Response): Promise<unknown> {

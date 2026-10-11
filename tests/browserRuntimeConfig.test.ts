@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { configValue, fetchRuntimeConfig, loadRuntimeConfig, parseRuntimeConfig } from "../src/runtimeConfig.ts";
 import { runtimeFixture, ZONES, pageOf } from "./fixtures/runtimeConfig.ts";
@@ -83,7 +84,13 @@ test("fetch is same-origin, uncached, credential-free and fails closed", async (
   assert.equal(seen?.[1]?.redirect, "error");
   await assert.rejects(fetchRuntimeConfig(pageOf(), (async () => new Response("", { status: 404 })) as typeof fetch));
   await assert.rejects(fetchRuntimeConfig(pageOf(), (async () => new Response("<html>")) as typeof fetch));
-  assert.throws(() => configValue("VITE_IM_BASE"), /not initialized/);
   await loadRuntimeConfig(pageOf(), ok as typeof fetch);
   assert.equal(configValue("VITE_IM_BASE"), config.VITE_IM_BASE);
+});
+
+test("reading config before boot loaded it throws instead of defaulting", () => {
+  const child = spawnSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e",
+    'const m = await import("./src/runtimeConfig.ts"); try { m.configValue("VITE_IM_BASE"); process.exit(1) } catch (e) { if (!/not initialized/.test(e.message)) process.exit(2) }'],
+    { cwd: new URL("..", import.meta.url), encoding: "utf8" });
+  assert.equal(child.status, 0, child.stderr);
 });

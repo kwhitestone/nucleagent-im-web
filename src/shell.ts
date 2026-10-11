@@ -12,10 +12,10 @@
 // Validation mirrors core-web's applyShellSession: monotonic sessionVersion,
 // bounded token, `source === "shell"`. The credential stays in memory.
 import { createRemoteChildChannel } from "./vendor/prism-fusion-plugin-runtime/remote-channel.ts";
-import { outerAware } from "./outerHost.ts";
+import { configValue } from "./runtimeConfig.ts";
 import { parseConversationTarget, type ConversationTarget } from "./conversationTarget.ts";
 
-const shellOrigin = outerAware(import.meta.env?.VITE_SHELL_URL || "http://localhost:26600");
+const shellOrigin = configValue("VITE_SHELL_URL");
 
 export interface ShellAuthIntent {
   token: string | null;
@@ -96,7 +96,7 @@ export function installShellBridge(options: ShellBridgeOptions): ShellBridge {
   const channel = createRemoteChildChannel({
     appId: "im",
     hostOrigin: new URL(shellOrigin).origin,
-    allowedHostOrigins: import.meta.env?.VITE_SHELL_ALLOWED_ORIGINS,
+    allowedHostOrigins: configValue("VITE_SHELL_ALLOWED_ORIGINS"),
     parent: window.parent,
     messages: {
       toChild: ["auth", "conversation"],
