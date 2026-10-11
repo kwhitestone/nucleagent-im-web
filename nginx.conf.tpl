@@ -8,6 +8,13 @@ server {
     gzip on;
     gzip_types text/css application/javascript application/json image/svg+xml;
 
+    location = /runtime-config.json {
+        alias /etc/nucleagent/runtime-config.json;
+        default_type application/json;
+        add_header Cache-Control "no-store" always;
+        add_header X-Content-Type-Options nosniff always;
+    }
+
     location = /healthz {
         access_log off;
         default_type text/plain;

@@ -10,41 +10,18 @@ ARG NGINX_IMAGE=nginx:1.27-alpine
 FROM ${NODE_IMAGE} AS web-build
 WORKDIR /build
 
-# Vite inlines these values at build time.
-ARG VITE_AUTH_BASE
-ARG VITE_IM_BASE
-ARG VITE_CORE_BASE
-# The nucleagent-web shell origin. Embedded mode accepts session pushes from
-# this exact origin only (src/shell.ts), and nginx allows framing only from it.
-ARG VITE_SHELL_URL
-ARG VITE_SHELL_ALLOWED_ORIGINS=
-# The shell-owned AccountPopover remote module (UNI-ACCTUI), imported at
-# runtime; a shell deploy updates it with no im-web rebuild. Empty: the
-# identity card shows avatar + name only.
-ARG VITE_ACCOUNT_UI_URL
-
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
 COPY . .
-RUN test -n "${VITE_AUTH_BASE}" && test -n "${VITE_IM_BASE}" && test -n "${VITE_CORE_BASE}" && test -n "${VITE_SHELL_URL}" && \
-    VITE_AUTH_BASE="${VITE_AUTH_BASE}" \
-    VITE_IM_BASE="${VITE_IM_BASE}" \
-    VITE_CORE_BASE="${VITE_CORE_BASE}" \
-    VITE_SHELL_URL="${VITE_SHELL_URL}" \
-    VITE_SHELL_ALLOWED_ORIGINS="${VITE_SHELL_ALLOWED_ORIGINS}" \
-    VITE_ACCOUNT_UI_URL="${VITE_ACCOUNT_UI_URL}" \
-    npm run build
+RUN npm run build
 
 FROM ${NGINX_IMAGE} AS final
-ARG VITE_SHELL_URL
+# One image for every environment: browser endpoints (VITE_* whitelist) and
+# frame-ancestors are required at container start, never at build time.
 
-# frame-ancestors is resolved at container start by the dedicated runtime
-# script. Changing the shell origin also requires rebuilding the baked Vite
-# origin above.
-ENV SHELL_ORIGIN=${VITE_SHELL_URL}
-
-COPY nginx.conf.tpl /etc/nginx/templates/nginx.conf.tpl
+# Outside /etc/nginx/templates: only our validated runtime hook renders it.
+COPY nginx.conf.tpl /etc/nginx/runtime.conf.template
 COPY docker-entrypoint.d/40-runtime-config.sh /docker-entrypoint.d/40-runtime-config.sh
 RUN chmod 0555 /docker-entrypoint.d/40-runtime-config.sh
 COPY --from=web-build /build/dist/ /usr/share/nginx/html/
