@@ -1,0 +1,14 @@
+@media (prefers-color-scheme: dark) {
+  .agent-management, .definition-drawer, .agent-effective {
+    color-scheme: dark;
+    --bg-card: Canvas;
+    --bg-subtle: color-mix(in srgb, CanvasText 6%, Canvas);
+    --bg-hover: color-mix(in srgb, CanvasText 10%, Canvas);
+    --text-primary: CanvasText;
+    --text-secondary: color-mix(in srgb, CanvasText 72%, Canvas);
+    --text-tertiary: color-mix(in srgb, CanvasText 62%, Canvas);
+    --border: color-mix(in srgb, CanvasText 25%, Canvas);
+    --border-strong: color-mix(in srgb, CanvasText 40%, Canvas);
+    background: var(--bg-card);
+  }
+}

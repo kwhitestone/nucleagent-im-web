@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { trapDialogFocus } from "./focus";
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { X, Plus, RefreshCw } from "@lucide/vue";
@@ -65,7 +66,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <dialog ref="dialog" class="definition-drawer" aria-labelledby="create-definition-title" @cancel.prevent="close">
+  <dialog ref="dialog" class="definition-drawer" aria-labelledby="create-definition-title" @cancel.prevent="close" @keydown="trapDialogFocus">
     <header><h2 id="create-definition-title">{{ label('create') }}</h2>
       <button type="button" class="icon" :disabled="draft.busy || draft.frozen" :aria-label="label('close')" :title="label('close')" @click="close"><X :size="20" /></button></header>
     <div class="drawer-body">
@@ -96,4 +97,5 @@ onUnmounted(() => {
   </dialog>
 </template>
 
+<style scoped src="./theme.css"></style>
 <style scoped src="./drawer.css"></style>

@@ -156,6 +156,7 @@ onUnmounted(() => {
   </section>
 </template>
 
+<style scoped src="./theme.css"></style>
 <style scoped>
 .agent-management { color: var(--text-primary, CanvasText); background: var(--bg-card, Canvas); min-height: 100%; padding: 24px; box-sizing: border-box; }
 .management-heading { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; } h1 { font-size: 22px; margin: 0; flex: 1; min-width: 0; overflow-wrap: anywhere; }

@@ -92,6 +92,7 @@ onUnmounted(() => {
   </section>
 </template>
 
+<style scoped src="./theme.css"></style>
 <style scoped>
 .agent-effective { padding: 16px 0; border-block: 1px solid var(--border); color: var(--text-primary, CanvasText); min-width: 0; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 12px; } h2 { font-size: 16px; margin: 0; } h3 { font-size: 14px; }

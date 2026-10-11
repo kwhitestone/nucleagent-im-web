@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { trapDialogFocus } from "./focus";
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { X, Save, RefreshCw, Power, Trash2, RotateCcw, ChevronLeft, ChevronRight } from "@lucide/vue";
@@ -204,7 +205,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <dialog ref="dialog" class="definition-drawer" aria-labelledby="definition-title" @cancel.prevent="close">
+  <dialog ref="dialog" class="definition-drawer" aria-labelledby="definition-title" @cancel.prevent="close" @keydown="trapDialogFocus">
     <header v-if="editor.record">
       <div><h2 id="definition-title">{{ record.definition.name }}</h2><small>Core #{{ record.definition.id }} · {{ label('revision') }} {{ record.definition.revision }}</small></div>
       <button type="button" class="icon" :title="label('close')" :aria-label="label('close')" @click="close"><X :size="20" /></button>
@@ -298,6 +299,7 @@ onUnmounted(() => {
   </dialog>
 </template>
 
+<style scoped src="./theme.css"></style>
 <style scoped>
 .definition-drawer { box-sizing: border-box; position: fixed; inset: 0 0 0 auto; margin: 0; width: min(760px, 94vw); max-width: 100%; height: 100dvh; max-height: 100dvh; padding: 0; border: 0; border-left: 1px solid var(--border); background: var(--bg-card, Canvas); color: var(--text-primary, CanvasText); }
 .definition-drawer[open] { display: flex; flex-direction: column; }

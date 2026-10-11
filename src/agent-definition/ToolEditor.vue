@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { trapDialogFocus } from "./focus";
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { X, Save, RefreshCw, Plus } from "@lucide/vue";
@@ -140,7 +141,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <dialog ref="dialog" class="definition-drawer" aria-labelledby="tool-editor-title" @cancel.prevent="close">
+  <dialog ref="dialog" class="definition-drawer" aria-labelledby="tool-editor-title" @cancel.prevent="close" @keydown="trapDialogFocus">
     <header><h2 id="tool-editor-title">{{ record?.tool.name || label('tools') }}</h2>
       <button type="button" class="icon" :title="label('close')" :aria-label="label('close')" @click="close"><X :size="20" /></button></header>
     <div class="drawer-body">
@@ -181,6 +182,7 @@ onUnmounted(() => {
   </dialog>
 </template>
 
+<style scoped src="./theme.css"></style>
 <style scoped src="./drawer.css"></style>
 <style scoped>
 .tool-field { display: grid; gap: 8px; margin: 20px 0; min-width: 0; }
