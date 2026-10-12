@@ -112,7 +112,10 @@ test("missing or unsafe browser config fails the container start without echoing
     } finally { rmSync(directory, { recursive: true, force: true }); }
   }
   for (const [key, value] of [
-    ["VITE_IM_BASE", ""], ["VITE_IM_BASE", "https://im.example.test/"], ["VITE_IM_BASE", 'https://a.test","X":"y'],
+    ["VITE_IM_BASE", ""], ["VITE_AUTH_BASE", "http://localhost:26670"], ["VITE_IM_BASE", "http://127.0.0.1:26655"],
+    ["VITE_IM_BASE", "https://127.0.0.1"], ["VITE_IM_BASE", "https://localhost"], ["VITE_IM_BASE", "https://a.localhost"],
+    ["VITE_CORE_BASE", "http://nucleagent-core-web.dev.ndaeweb.com"], ["VITE_SHELL_URL", "https://example"],
+    ["VITE_ACCOUNT_UI_URL", "http://localhost:26600/remote/account-ui.js"], ["VITE_IM_BASE", "https://im.example.test/"], ["VITE_IM_BASE", 'https://a.test","X":"y'],
     ["VITE_AUTH_BASE", "https://u:secret-canary@auth.example.test"], ["VITE_CORE_BASE", "https://core.example.test?t=secret-canary"],
     ["VITE_ACCOUNT_UI_URL", "https://web.example.test"], ["VITE_ACCOUNT_UI_URL", "https://web.example.test/a.js?t=secret-canary"],
     ["VITE_ACCOUNT_UI_URL", 'https://web.example.test/a".js'], ["VITE_ACCOUNT_UI_URL", "javascript:alert(1)/x"],

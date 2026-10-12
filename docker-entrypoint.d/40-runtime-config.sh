@@ -16,6 +16,18 @@ valid_origin() {
     esac
 }
 
+# Browser endpoints are public services: https, a dotted DNS name, no IP or
+# loopback, so a bad value fails here rather than at the first API call.
+public_origin() {
+    valid_origin "$1" || return 1
+    host=${1#https://}
+    [ "$host" != "$1" ] || return 1
+    host=${host%%:*}
+    case "$host" in *.*.*) ;; *) return 1 ;; esac
+    case "$host" in *[!0-9.]*) ;; *) return 1 ;; esac
+    case "$host" in localhost|*.localhost) return 1 ;; esac
+}
+
 # The frame-ancestors default follows the shell the browser trusts.
 SHELL_ORIGIN=${SHELL_ORIGIN:-${VITE_SHELL_URL:-}}
 
@@ -80,14 +92,14 @@ for var in $runtime_keys; do
                 authority=${value#*://}
                 origin_part=${value%%://*}://${authority%%/*}
                 case "$authority" in */*) ;; *) bad=1 ;; esac
-                if [ -n "$bad" ] || ! valid_origin "$origin_part"; then
+                if [ -n "$bad" ] || ! public_origin "$origin_part"; then
                     printf '%s must be an HTTP(S) URL with a plain path and no query, fragment or credentials.\n' "$var" >&2
                     exit 1
                 fi
             fi ;;
         *)
-            if ! valid_origin "$value"; then
-                printf '%s must be a single HTTP(S) origin.\n' "$var" >&2
+            if ! public_origin "$value"; then
+                printf '%s must be a single public HTTPS origin.\n' "$var" >&2
                 exit 1
             fi ;;
     esac
