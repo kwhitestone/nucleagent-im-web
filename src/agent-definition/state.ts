@@ -52,7 +52,11 @@ export class DefinitionEditor {
       ...(!record.capabilities.readSkills ? { skills: [], skillBindings: [] } : {}),
       ...(!record.capabilities.readTools ? { tools: [] } : {}) };
     if (!record.capabilities.readSkills) this.bindings = undefined;
-    if (this.dirty && changed) { this.current = record; this.error = "conflict"; }
+    if (this.dirty && changed) {
+      // An identical re-read (412 reread, then the event poll) keeps the open comparison and the user's choices.
+      if (JSON.stringify(record) !== JSON.stringify(this.current)) this.current = record;
+      this.error = "conflict";
+    }
     else if (!this.dirty) this.record = record;
     else this.record = { ...this.record, capabilities: record.capabilities, fieldPolicy: record.fieldPolicy };
   }
