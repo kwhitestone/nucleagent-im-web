@@ -15,6 +15,7 @@ const cases = [
   ["strong-cas", "api.ts", '"If-Match": record.etag', '"If-Match": "*"', "agent-definition-api.test.ts"],
   ["read-revocation", "state.ts", "if (!record.capabilities.read) { this.revokeRead(); return; }", "", "agent-definition-state.test.ts"],
   ["late-save", "state.ts", "if (generation !== this.generation) return null;", "if (false) return null;", "agent-definition-state.test.ts"],
+  ["conflict-choice-stable", "state.ts", "if (JSON.stringify(record) !== JSON.stringify(this.current)) this.current = record;", "this.current = record;", "agent-definition-ordering.test.ts"],
   ["session-isolation", "transport.ts", "current()?.uid !== session.uid || current()?.jwt !== session.jwt", "false", "agent-definition-transport.test.ts"],
 ];
 const run = (cwd, test) => spawnSync(process.execPath, ["--experimental-strip-types", "--test", `tests/${test}`],
