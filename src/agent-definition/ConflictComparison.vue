@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { compareChanges, definitionFields, type Changes } from "./draft";
+import { compareChanges, definitionFields, readPath, type Changes } from "./draft";
 import { text, type MessageKey } from "./messages";
 const props = defineProps<{ baseline: unknown; changes: Changes; current: unknown }>();
 const emit = defineEmits<{ resolve: [choices: Record<string, "mine" | "current">] }>();
@@ -9,7 +9,11 @@ const { locale } = useI18n();
 const label = (key: MessageKey) => text(key, locale.value);
 const rows = computed(() => compareChanges(props.baseline, props.changes, props.current));
 const choices = reactive<Record<string, "mine" | "current">>({});
-watch(() => props.current, () => { Object.keys(choices).forEach((key) => delete choices[key]); });
+// Clear only when the conflict itself changes (new revision or new conflicting value):
+// polling/focus re-reads of the same revision arrive as new objects and must keep choices.
+const conflictKey = computed(() => JSON.stringify([readPath(props.current, "/revision"),
+  rows.value.filter(row => row.conflict).map(row => [row.path, row.current])]));
+watch(conflictKey, () => { Object.keys(choices).forEach((key) => delete choices[key]); });
 const resolved = computed(() => rows.value.every(row => !row.conflict || choices[row.path]));
 const display = (value: unknown) => value === undefined ? label("unknown") : typeof value === "string" ? value : JSON.stringify(value);
 const fieldName = (path: string) => { const field = definitionFields.find(item => item.path === path); return field ? label(field.label as MessageKey) : path; };
