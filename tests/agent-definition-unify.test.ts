@@ -40,7 +40,7 @@ test("backend error codes map to Chinese reasons instead of the generic failure"
 test("enable is disabled with a hint while the model is empty, and allowed once a model is chosen", async () => {
   const empty = await mount("src/agent-definition/DefinitionDrawer.vue", { detail: detail(), api: {} });
   try {
-    assert.match(empty.html, /<button[^>]*disabled[^>]*title="请先选择模型"[^>]*>[\s\S]{0,400}?启用/);
+    assert.match(empty.html, /<button[^>]*title="请先选择模型" disabled>[\s\S]{0,400}?启用/);
     assert.match(empty.html, /请先选择模型/);
   } finally { empty.restore(); }
   const chosen = await mount("src/agent-definition/DefinitionDrawer.vue",

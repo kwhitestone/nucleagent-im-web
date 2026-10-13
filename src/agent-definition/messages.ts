@@ -89,8 +89,38 @@ export const messages = {
   canRead: ["可查看", "Can view"], canWrite: ["可编辑定义", "Can edit definition"], canSkills: ["可改技能绑定", "Can edit skill bindings"],
   canDelete: ["可删除", "Can delete"], yes: ["是", "Yes"], no: ["否", "No"], updated: ["最近修改", "Updated"],
   noAgents: ["还没有智能体", "No agents yet"], changesUnit: [" 处", ""], technical: ["技术信息", "Technical details"], viewOnly: ["你只有查看权限", "You have view-only access"],
+  modelRequired: ["请先选择模型，再启用这个智能体。", "Choose a model before enabling this agent."],
+  selectModelFirst: ["请先选择模型", "Choose a model first"],
+  identityNotReady: ["IM 身份还没开通好，请稍后刷新再试，或点“重试开通”。", "The IM identity is not ready yet. Refresh later or retry provisioning."],
+  identityRevoked: ["IM 身份授权已被撤销，需要在账号管理中恢复后才能操作。", "The IM identity authorization was revoked; restore it in account management first."],
+  identityFailed: ["IM 身份同步失败，本次修改没有生效，请稍后重试。", "IM identity sync failed; nothing was changed. Try again later."],
+  mustDisable: ["请先停用这个智能体，再删除。", "Disable this agent before deleting it."],
+  deletedLocked: ["这个智能体已删除，请先恢复再修改。", "This agent is deleted; restore it before editing."],
+  invalidPatch: ["填写的内容不符合要求，请检查后再保存。", "Some values are invalid; check them and save again."],
+  modelMismatch: ["所选模型类型不适合当前用途，请换一个模型。", "The selected model type does not fit; choose another model."],
+  recycle: ["回收站", "Recycle bin"], allLive: ["全部", "All"],
+  importRecommended: ["导入推荐智能体", "Import recommended agents"],
+  importNote: ["导入后为停用状态，选好模型后再启用；已存在的不会被覆盖。", "Imported agents start disabled; choose a model, then enable. Existing ones are never overwritten."],
+  willImport: ["将导入", "Will import"], skippedExists: ["已存在，跳过", "Already exists, skipped"],
+  skippedDeleted: ["已存在（在回收站），跳过", "Exists in recycle bin, skipped"], imported: ["已导入", "Imported"],
+  confirmImport: ["确认导入", "Import"], nothingToImport: ["全部已存在，没有需要导入的", "Everything already exists; nothing to import"],
 } as const;
 export type MessageKey = keyof typeof messages;
 export function text(key: MessageKey, locale: string): string {
   return messages[key][locale.startsWith("zh") ? 0 : 1];
+}
+
+const errorKeys: Record<string, MessageKey> = {
+  agent_definition_im_requires_model: "modelRequired", agent_identity_not_ready: "identityNotReady",
+  agent_identity_revoked: "identityRevoked", agent_identity_projection_failed: "identityFailed",
+  agent_identity_unavailable: "identityFailed", agent_identity_binding_conflict: "identityFailed",
+  agent_identity_update_failed: "identityFailed", agent_definition_active: "mustDisable",
+  agent_definition_deleted: "deletedLocked", invalid_definition_patch: "invalidPatch", model_type_mismatch: "modelMismatch",
+};
+/** Maps a failed request to a user-facing reason; unknown failures keep the generic message. */
+export function errorKey(error: unknown): MessageKey {
+  const e = error as { status?: unknown; code?: unknown } | null;
+  if (typeof e?.status !== "number") return "error";
+  if (e.status === 401 || e.status === 403) return "denied";
+  return (typeof e.code === "string" && errorKeys[e.code]) || "error";
 }

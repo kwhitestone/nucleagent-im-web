@@ -202,6 +202,16 @@ export function createDefinitionApi(transport: Transport) {
         method: "DELETE", headers: { "If-Match": record.etag },
       }, true);
     },
+    async recommended(): Promise<RecommendedRow[]> {
+      const { data } = await request<RecommendedRow[]>(`${BASE}/recommended`);
+      if (!Array.isArray(data)) throw new Error("Invalid recommended contract");
+      return data;
+    },
+    async importRecommended(): Promise<RecommendedRow[]> {
+      const { data } = await request<RecommendedRow[]>(`${BASE}/import-recommended`, { method: "POST" });
+      if (!Array.isArray(data)) throw new Error("Invalid recommended contract");
+      return data;
+    },
     async list(): Promise<Definition[]> {
       const { data } = await request<Definition[]>(`${BASE}?include_deleted=1`);
       if (!Array.isArray(data)) throw new Error("Invalid definition list contract");
@@ -262,4 +272,5 @@ export function createDefinitionApi(transport: Transport) {
     },
   };
 }
+export interface RecommendedRow { slug: string; name: string; description: string; status: "create" | "created" | "skipped"; reason?: "exists" | "deleted"; id?: number }
 export type DefinitionApi = ReturnType<typeof createDefinitionApi>;

@@ -12,7 +12,7 @@ import { avatarGradient, avatarUrl, changeCount, dirtyGroups, groupPaths, groups
 import { DefinitionError, type Catalog, type DefinitionApi, type Detail, type Impact, type LifecycleAction, type Audit, type Instance } from "./api";
 import { DefinitionEditor, sameImpact } from "./state";
 import { definitionFields, readPath, reconcileBindings, validateChanges } from "./draft";
-import { text, type MessageKey } from "./messages";
+import { errorKey, text, type MessageKey } from "./messages";
 
 const props = defineProps<{ api: DefinitionApi; detail: Detail; catalog?: Catalog }>();
 const emit = defineEmits<{ close: []; changed: [detail: Detail] }>();
@@ -69,7 +69,7 @@ const impactKeys = ["instances", "conversations", "conversations_7d", "skill_bin
 function failure(error: unknown) {
   if (error instanceof DefinitionError && [401, 403].includes(error.status)) {
     editor.denied = true; editor.error = "denied";
-  } else status.value = "error";
+  } else status.value = errorKey(error);
 }
 function revokeRead() {
   readGeneration++; pageGeneration++;
@@ -214,6 +214,8 @@ const activeGroup = ref<Group>("basic");
 const body = ref<HTMLElement>();
 const dirtyGroupSet = computed(() => dirtyGroups(editor.changes, editor.bindings));
 const pending = computed(() => changeCount(editor.changes, editor.bindings));
+// Backend refuses enabling without an explicit model (422); gate it here instead of failing late.
+const needsModel = computed(() => !record.value.definition.isActive && !String(draftValue("/config/defaults/model") ?? "").trim());
 const canSave = computed(() => record.value.capabilities.write && writable.value && editor.dirty && !editor.current && !editor.verificationRequired && !Object.keys(errors.value).length);
 const draftValue = (path: string) => Object.hasOwn(editor.changes, path) ? editor.changes[path] : readPath(record.value.definition, path);
 const draftName = computed(() => String(draftValue("/name") ?? ""));
@@ -266,7 +268,7 @@ onUnmounted(() => clearTimeout(toastTimer));
         <small>#{{ record.definition.id }} · {{ record.definition.slug }} · <span :key="record.definition.revision" class="revision">{{ label('revision') }} {{ record.definition.revision }}</span></small>
       </div>
       <div class="head-actions">
-        <button v-if="writable && record.capabilities.writeIdentity" type="button" class="ghost" :title="editor.dirty ? label('unsavedHint') : undefined" :disabled="editor.dirty || editor.verificationRequired || (!record.definition.isActive && record.identity.status !== 'ready')" @click="prepare(record.definition.isActive ? 'disable' : 'enable')"><Power :size="15" />{{ label(record.definition.isActive ? 'disable' : 'enable') }}</button>
+        <button v-if="writable && record.capabilities.writeIdentity" type="button" class="ghost" :title="editor.dirty ? label('unsavedHint') : needsModel ? label('selectModelFirst') : undefined" :disabled="editor.dirty || editor.verificationRequired || (!record.definition.isActive && (record.identity.status !== 'ready' || needsModel))" @click="prepare(record.definition.isActive ? 'disable' : 'enable')"><Power :size="15" />{{ label(record.definition.isActive ? 'disable' : 'enable') }}</button>
         <button v-if="record.capabilities.delete && !record.definition.deletedAt" type="button" class="ghost danger" :title="editor.dirty ? label('unsavedHint') : undefined" :disabled="locked || editor.dirty || record.definition.isActive" @click="prepare('delete')"><Trash2 :size="15" />{{ label('delete') }}</button>
         <button v-if="record.capabilities.restore && record.definition.deletedAt" type="button" class="ghost" :disabled="operationLocked" @click="prepare('restore')"><RotateCcw :size="15" />{{ label('restore') }}</button>
         <button type="button" class="icon" :title="label('close')" :aria-label="label('close')" @click="close"><X :size="18" /></button>
@@ -281,6 +283,7 @@ onUnmounted(() => clearTimeout(toastTimer));
         <p v-if="alertKey" role="alert" class="notice" :class="editor.error === 'uncertain' ? 'warn' : 'error'"><TriangleAlert :size="16" aria-hidden="true" />{{ label(alertKey as MessageKey) }}
           <button v-if="editor.verificationRequired" type="button" class="ghost" @click="refresh">{{ label('queryResult') }}</button></p>
         <p v-if="!record.capabilities.write" class="notice muted-note">{{ label('viewOnly') }}</p>
+        <p v-if="needsModel && writable && record.capabilities.writeIdentity && !record.definition.deletedAt" class="notice muted-note">{{ label('selectModelFirst') }}</p>
         <section v-if="editor.current" class="conflict-card" aria-labelledby="conflict-title">
           <h3 id="conflict-title"><TriangleAlert :size="16" aria-hidden="true" />{{ label('conflictTitle') }} <small>({{ label('revision') }} {{ record.definition.revision }} → {{ editor.current.definition.revision }})</small></h3>
           <p>{{ label('conflictKeep') }}</p>

@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { ArrowLeft, RefreshCw, Search, Bot, Plus, Clock } from "@lucide/vue";
+import { ArrowLeft, RefreshCw, Search, Bot, Plus, Clock, Sparkles } from "@lucide/vue";
 import DefinitionDrawer from "./DefinitionDrawer.vue";
 import CreateDefinition from "./CreateDefinition.vue";
-import { DefinitionError, type Catalog, type Definition, type DefinitionApi, type Detail } from "./api";
+import { DefinitionError, type Catalog, type Definition, type DefinitionApi, type Detail, type RecommendedRow } from "./api";
 import { invalidatedDefinitions } from "./events";
 import { newerRevision, readPath } from "./draft";
-import { text, type MessageKey } from "./messages";
+import { errorKey, text, type MessageKey } from "./messages";
 import { avatarGradient, initial } from "./groups";
 
 const props = defineProps<{ api: DefinitionApi; initialId?: number; closable?: boolean }>();
@@ -30,7 +30,8 @@ let cursor = "0";
 let timer: ReturnType<typeof setTimeout> | undefined;
 let polling = false;
 const state = (definition: Definition): "deleted" | "active" | "disabled" => definition.deletedAt ? "deleted" : definition.isActive ? "active" : "disabled";
-const visible = computed(() => definitions.value.filter(definition => (filter.value === "all" || filter.value === state(definition))
+// "all" is every live row; deleted rows only show under the recycle-bin filter.
+const visible = computed(() => definitions.value.filter(definition => (filter.value === "all" ? !definition.deletedAt : filter.value === state(definition))
   && `${definition.id}\n${definition.name}\n${definition.slug}\n${definition.config?.description ?? ""}`.toLocaleLowerCase().includes(query.value.trim().toLocaleLowerCase())));
 const avatar = (definition: Definition) => {
   const value = definition.config?.avatar;
@@ -38,7 +39,7 @@ const avatar = (definition: Definition) => {
   try { const url = new URL(value); return url.protocol === "https:" && !url.username && !url.password ? url.href : ""; } catch { return ""; }
 };
 function failure(cause: unknown) {
-  error.value = cause instanceof DefinitionError && [401, 403].includes(cause.status) ? "denied" : "error";
+  error.value = errorKey(cause) === "denied" ? "denied" : "error";
   if (error.value === "denied") {
     generation++; selectionGeneration++;
     definitions.value = []; catalog.value = undefined;
@@ -124,7 +125,24 @@ onUnmounted(() => {
   document.removeEventListener("visibilitychange", onFocus);
 });
 const filters = ["all", "active", "disabled", "deleted"] as const;
-const counts = computed(() => Object.fromEntries(filters.map(key => [key, key === "all" ? definitions.value.length : definitions.value.filter(row => state(row) === key).length])) as Record<typeof filters[number], number>);
+const filterLabel: Record<typeof filters[number], MessageKey> = { all: "allLive", active: "active", disabled: "disabled", deleted: "recycle" };
+const counts = computed(() => Object.fromEntries(filters.map(key => [key, definitions.value.filter(row => key === "all" ? !row.deletedAt : state(row) === key).length])) as Record<typeof filters[number], number>);
+// Recommended import: preview first, import only on confirmation; the server skips any existing slug.
+const recommended = ref<RecommendedRow[] | null>(null);
+const importing = ref(false);
+const importError = ref<MessageKey | "">("");
+const toImport = computed(() => recommended.value?.filter(row => row.status === "create").length ?? 0);
+const rowState = (row: RecommendedRow): MessageKey => row.status === "create" ? "willImport" : row.status === "created" ? "imported" : row.reason === "deleted" ? "skippedDeleted" : "skippedExists";
+async function previewImport() {
+  importError.value = ""; importing.value = true;
+  try { recommended.value = await props.api.recommended(); } catch (cause) { importError.value = errorKey(cause); recommended.value = []; }
+  finally { importing.value = false; }
+}
+async function confirmImport() {
+  importError.value = ""; importing.value = true;
+  try { recommended.value = await props.api.importRecommended(); await refresh(); } catch (cause) { importError.value = errorKey(cause); }
+  finally { importing.value = false; }
+}
 const updated = (value?: string) => value ? new Date(value).toLocaleString(locale.value, { dateStyle: "medium", timeStyle: "short" }) : "";
 </script>
 
@@ -135,12 +153,13 @@ const updated = (value?: string) => value ? new Date(value).toLocaleString(local
       <div class="heading-copy"><h1 id="agent-management-title">{{ label('title') }}</h1>
         <p class="subtitle">{{ label('active') }} {{ counts.active }} · {{ label('disabled') }} {{ counts.disabled }}</p></div>
       <button type="button" class="icon" :title="label('refresh')" :aria-label="label('refresh')" :disabled="loading" @click="refresh"><RefreshCw :size="18" :class="{ spin: loading }" /></button>
+      <button v-if="catalog?.capabilities.create" type="button" :disabled="importing" @click="previewImport"><Sparkles :size="16" /><span class="create-text">{{ label('importRecommended') }}</span></button>
       <button v-if="catalog?.capabilities.create" type="button" class="primary" :title="label('create')" :aria-label="label('create')" @click="creating = true"><Plus :size="16" /><span class="create-text">{{ label('create') }}</span></button>
     </header>
     <div class="management-toolbar">
       <label class="search"><Search :size="16" aria-hidden="true" /><input v-model="query" type="search" :aria-label="label('search')" :placeholder="label('search')" /></label>
       <div class="filter-pills" role="group" :aria-label="label('all')">
-        <button v-for="value in filters" :key="value" type="button" :aria-pressed="filter === value" @click="filter = value">{{ label(value) }}<span class="count">{{ counts[value] }}</span></button>
+        <button v-for="value in filters" :key="value" type="button" :aria-pressed="filter === value" @click="filter = value">{{ label(filterLabel[value]) }}<span class="count">{{ counts[value] }}</span></button>
       </div>
     </div>
     <p v-if="error" role="alert" class="error-card">{{ label(error) }} <button type="button" class="ghost" @click="refresh">{{ label('retry') }}</button></p>
@@ -163,6 +182,18 @@ const updated = (value?: string) => value ? new Date(value).toLocaleString(local
       </li>
     </ul>
     <DefinitionDrawer v-if="selected" :key="selected.definition.id" :api="api" :detail="selected" :catalog="catalog" @close="closeDetail" @changed="changed" />
+    <div v-if="recommended" class="import-backdrop" @click.self="recommended = null">
+      <section class="import-dialog" role="dialog" aria-modal="true" aria-labelledby="import-title">
+        <h2 id="import-title">{{ label('importRecommended') }}</h2>
+        <p class="subtitle">{{ label('importNote') }}</p>
+        <p v-if="importError" role="alert" class="error-card">{{ label(importError) }}</p>
+        <ul class="import-rows"><li v-for="row in recommended" :key="row.slug" :data-slug="row.slug"><span><strong>{{ row.name }}</strong><small>{{ row.description }}</small></span>
+          <span class="pill" :class="{ active: row.status !== 'skipped' }">{{ label(rowState(row)) }}</span></li></ul>
+        <p v-if="recommended.length && !toImport" role="status" class="subtitle">{{ label('nothingToImport') }}</p>
+        <div class="import-actions"><button type="button" @click="recommended = null">{{ label('close') }}</button>
+          <button v-if="toImport" type="button" class="primary" :disabled="importing" @click="confirmImport">{{ label('confirmImport') }} ({{ toImport }})</button></div>
+      </section>
+    </div>
     <CreateDefinition v-if="creating && catalog" :api="api" :catalog="catalog" @close="creating = false" @created="created" />
   </section>
 </template>
@@ -202,6 +233,12 @@ button:disabled { opacity: .5; cursor: not-allowed; } :focus-visible { outline: 
 .empty { display: grid; justify-items: center; gap: 8px; padding: 64px 0; color: var(--text-tertiary); } .empty p { margin: 0; font-size: 13.5px; }
 .error-card { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px; border-radius: var(--r-md); background: #fff1f2; color: #be123c; font-size: 13px; }
 .spin { animation: spin 1s linear infinite; }
+.import-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 16px; background: rgb(15 23 42 / .35); }
+.import-dialog { width: min(520px, 100%); max-height: 90dvh; overflow: auto; display: grid; gap: 12px; padding: 20px; border-radius: var(--r-lg); background: var(--bg-card); box-shadow: var(--shadow-xl); }
+.import-dialog h2 { margin: 0; font-size: 17px; } .import-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.import-rows li { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-md); }
+.import-rows span:first-child { display: grid; min-width: 0; } .import-rows small { font-size: 12px; color: var(--text-secondary); }
+.import-actions { display: flex; justify-content: flex-end; gap: 8px; }
 @media (max-width: 1200px) { .agent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 768px) { .agent-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 600px) { .agent-management { padding: 14px 12px; } h1 { font-size: 18px; } .create-text { display: none; } .primary { width: 40px; padding: 0; } .empty .primary { width: auto; padding: 8px 16px; }
