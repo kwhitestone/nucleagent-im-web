@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { ArrowLeft, RefreshCw, Search, ChevronRight, Bot, Plus } from "@lucide/vue";
+import { ArrowLeft, RefreshCw, Search, Bot, Plus, Clock } from "@lucide/vue";
 import DefinitionDrawer from "./DefinitionDrawer.vue";
 import CreateDefinition from "./CreateDefinition.vue";
 import { DefinitionError, type Catalog, type Definition, type DefinitionApi, type Detail } from "./api";
 import { invalidatedDefinitions } from "./events";
 import { newerRevision, readPath } from "./draft";
 import { text, type MessageKey } from "./messages";
+import { avatarGradient, initial } from "./groups";
 
 const props = defineProps<{ api: DefinitionApi; initialId?: number; closable?: boolean }>();
 const emit = defineEmits<{ close: []; invalidated: [ids: number[]] }>();
@@ -122,32 +123,42 @@ onUnmounted(() => {
   window.removeEventListener("focus", onFocus); window.removeEventListener("online", onFocus);
   document.removeEventListener("visibilitychange", onFocus);
 });
+const filters = ["all", "active", "disabled", "deleted"] as const;
+const counts = computed(() => Object.fromEntries(filters.map(key => [key, key === "all" ? definitions.value.length : definitions.value.filter(row => state(row) === key).length])) as Record<typeof filters[number], number>);
+const updated = (value?: string) => value ? new Date(value).toLocaleString(locale.value, { dateStyle: "medium", timeStyle: "short" }) : "";
 </script>
 
 <template>
   <section class="agent-management" aria-labelledby="agent-management-title">
     <header class="management-heading">
       <button v-if="closable" type="button" class="icon" :title="label('close')" :aria-label="label('close')" @click="emit('close')"><ArrowLeft :size="20" /></button>
-      <h1 id="agent-management-title">{{ label('title') }}</h1>
-      <button v-if="catalog?.capabilities.create" type="button" class="icon" :title="label('create')" :aria-label="label('create')" @click="creating = true"><Plus :size="18" /></button>
-      <button type="button" class="icon" :title="label('refresh')" :aria-label="label('refresh')" :disabled="loading" @click="refresh"><RefreshCw :size="18" /></button>
+      <div class="heading-copy"><h1 id="agent-management-title">{{ label('title') }}</h1>
+        <p class="subtitle">{{ label('active') }} {{ counts.active }} · {{ label('disabled') }} {{ counts.disabled }}</p></div>
+      <button type="button" class="icon" :title="label('refresh')" :aria-label="label('refresh')" :disabled="loading" @click="refresh"><RefreshCw :size="18" :class="{ spin: loading }" /></button>
+      <button v-if="catalog?.capabilities.create" type="button" class="primary" :title="label('create')" :aria-label="label('create')" @click="creating = true"><Plus :size="16" /><span class="create-text">{{ label('create') }}</span></button>
     </header>
     <div class="management-toolbar">
-      <label class="search"><Search :size="18" aria-hidden="true" /><input v-model="query" type="search" :aria-label="label('search')" :placeholder="label('search')" /></label>
-      <select v-model="filter" :aria-label="label('all')"><option v-for="value in (['all', 'active', 'disabled', 'deleted'] as const)" :key="value" :value="value">{{ label(value) }}</option></select>
+      <label class="search"><Search :size="16" aria-hidden="true" /><input v-model="query" type="search" :aria-label="label('search')" :placeholder="label('search')" /></label>
+      <div class="filter-pills" role="group" :aria-label="label('all')">
+        <button v-for="value in filters" :key="value" type="button" :aria-pressed="filter === value" @click="filter = value">{{ label(value) }}<span class="count">{{ counts[value] }}</span></button>
+      </div>
     </div>
-    <p v-if="error" role="alert">{{ label(error) }}</p>
-    <p v-if="loading" role="status">{{ label('loading') }}</p>
-    <p v-else-if="!visible.length" class="empty">{{ label('empty') }}</p>
-    <ul class="agent-rows" :aria-busy="loading">
-      <li v-for="definition in visible" :key="definition.id">
-        <button type="button" class="agent-row" :data-definition-id="definition.id" @click="open(definition.id)">
-          <img v-if="avatar(definition) && !failedAvatars.has(avatar(definition))" :src="avatar(definition)" alt="" class="agent-avatar" referrerpolicy="no-referrer" @error="failedAvatars.add(avatar(definition))" />
-          <span v-else class="agent-avatar fallback"><Bot :size="22" /></span>
-          <span class="agent-copy"><strong>{{ definition.name }}</strong><small>{{ definition.config?.description }}</small><code>#{{ definition.id }} · {{ definition.slug }}</code></span>
-          <span class="model">{{ readPath(definition, '/config/defaults/model') || label('inherit') }}</span>
-          <span class="state" :class="state(definition)">{{ label(state(definition)) }}</span>
-          <ChevronRight :size="18" aria-hidden="true" />
+    <p v-if="error" role="alert" class="error-card">{{ label(error) }} <button type="button" class="ghost" @click="refresh">{{ label('retry') }}</button></p>
+    <ul v-if="loading && !definitions.length" class="agent-grid" role="status" :aria-label="label('loading')"><li v-for="n in 6" :key="n" class="skeleton-card"></li></ul>
+    <div v-else-if="!visible.length" class="empty"><Bot :size="36" aria-hidden="true" /><p>{{ label(definitions.length ? 'empty' : 'noAgents') }}</p>
+      <button v-if="!definitions.length && catalog?.capabilities.create" type="button" class="primary" @click="creating = true"><Plus :size="16" />{{ label('create') }}</button></div>
+    <ul v-else class="agent-grid" :aria-busy="loading">
+      <li v-for="(definition, index) in visible" :key="definition.id">
+        <button type="button" class="agent-card" :class="[`delay-${Math.min(index + 1, 9)}`, { selected: selected?.definition.id === definition.id, gone: !!definition.deletedAt }]" :data-definition-id="definition.id" @click="open(definition.id)">
+          <span class="card-top">
+            <img v-if="avatar(definition) && !failedAvatars.has(avatar(definition))" :src="avatar(definition)" alt="" class="agent-avatar" referrerpolicy="no-referrer" @error="failedAvatars.add(avatar(definition))" />
+            <span v-else class="agent-avatar fallback" :style="{ background: avatarGradient(definition.id) }" aria-hidden="true">{{ initial(definition.name) }}</span>
+            <span class="agent-copy"><strong>{{ definition.name }}</strong><small class="slug" :title="`#${definition.id} · ${definition.slug}`">{{ definition.slug }}</small></span>
+            <span class="pill state" :class="state(definition)">{{ label(state(definition)) }}</span>
+          </span>
+          <span class="description">{{ definition.config?.description }}</span>
+          <span class="card-foot"><span class="pill model">{{ readPath(definition, '/config/defaults/model') || label('inherit') }}</span>
+            <span v-if="definition.updatedAt" class="updated" :title="label('updated')"><Clock :size="12" aria-hidden="true" />{{ updated(definition.updatedAt) }}</span></span>
         </button>
       </li>
     </ul>
@@ -158,20 +169,42 @@ onUnmounted(() => {
 
 <style scoped src="./theme.css"></style>
 <style scoped>
-.agent-management { color: var(--text-primary, CanvasText); background: var(--bg-card, Canvas); min-height: 100%; padding: 24px; box-sizing: border-box; }
-.management-heading { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; } h1 { font-size: 22px; margin: 0; flex: 1; min-width: 0; overflow-wrap: anywhere; }
-button, input, select { font: inherit; color: inherit; } button, select { cursor: pointer; }
-.icon, select { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-card, Canvas); }
-.icon { width: 44px; flex-shrink: 0; } select { padding: 8px 12px; max-width: 100%; }
-button:disabled { opacity: .5; cursor: not-allowed; } :focus-visible { outline: 2px solid var(--accent, #16796c); outline-offset: 2px; }
-.management-toolbar { display: flex; gap: 12px; margin: 24px 0 12px; flex-wrap: wrap; }
-.search { flex: 1; min-width: min(220px, 100%); display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--border); border-radius: 4px; }
-.search input { min-width: 0; width: 100%; min-height: 44px; border: 0; background: transparent; }
-.agent-rows { list-style: none; padding: 0; margin: 0; } .agent-row { width: 100%; display: grid; grid-template-columns: 44px minmax(0, 1fr) minmax(100px, 180px) 80px 20px; gap: 14px; align-items: center; text-align: start; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; padding: 16px 0; cursor: pointer; }
-.agent-row:hover { background: var(--bg-hover, #8881); } .agent-copy { min-width: 0; display: grid; gap: 5px; } strong { font-size: 14px; overflow-wrap: anywhere; }
-small, code { font-size: 12px; color: var(--text-secondary, GrayText); overflow-wrap: anywhere; } .model { font-size: 12px; overflow-wrap: anywhere; }
-.agent-avatar { display: block; width: 44px; height: 44px; border-radius: 6px; object-fit: cover; background: var(--bg-hover, #8881); } .fallback { display: grid; place-items: center; }
-.state { font-size: 12px; } .active { color: var(--teal-600, #16806f); } .deleted { color: var(--rose-500, #c13247); }
-.empty { padding: 48px 0; text-align: center; color: var(--text-secondary, GrayText); }
-@media (max-width: 600px) { .agent-management { padding: 16px; } .agent-row { grid-template-columns: 44px minmax(0, 1fr) 66px 16px; gap: 8px; } .model { display: none; } input, select { font-size: 16px; } h1 { font-size: 20px; } }
+.agent-management { position: relative; color: var(--text-primary); background: var(--bg); min-height: 100%; padding: 24px 28px; box-sizing: border-box; font-family: var(--font-body); isolation: isolate; }
+.agent-management::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--grad-mesh); pointer-events: none; }
+.management-heading { display: flex; gap: 10px; align-items: center; } .heading-copy { flex: 1; min-width: 0; }
+h1 { font-size: 22px; margin: 0; overflow-wrap: anywhere; } .subtitle { margin: 2px 0 0; font-size: 12.5px; color: var(--text-secondary); }
+button, input { font: inherit; color: inherit; } button { cursor: pointer; }
+button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-card); font-size: 12.5px; transition: all .2s var(--ease); }
+.icon { width: 40px; padding: 0; flex-shrink: 0; }
+.primary { border: 0; padding: 8px 16px; font-size: 13px; font-weight: 600; color: #fff; background: var(--grad-teal-indigo); background-size: 200% 200%; transition: all .25s var(--ease); }
+.primary:hover { transform: translateY(-1px); box-shadow: var(--shadow-teal); background-position: 100% 0; }
+button:disabled { opacity: .5; cursor: not-allowed; } :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.management-toolbar { display: flex; gap: 12px; margin: 20px 0 16px; flex-wrap: wrap; align-items: center; }
+.search { flex: 1; min-width: min(240px, 100%); display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-card); color: var(--text-tertiary); transition: border-color .2s var(--ease); }
+.search:focus-within { border-color: var(--accent); } .search input { min-width: 0; width: 100%; min-height: 40px; border: 0; outline: 0; background: transparent; color: var(--text-primary); }
+.filter-pills { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.filter-pills button { border-radius: var(--r-full); min-height: 34px; padding: 4px 12px; white-space: nowrap; color: var(--text-secondary); }
+.filter-pills [aria-pressed=true] { border-color: var(--accent); background: var(--teal-50); color: var(--teal-700); font-weight: 600; }
+.count { font-size: 11px; padding: 0 6px; border-radius: var(--r-full); background: var(--bg-subtle); }
+.agent-grid { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.agent-card { width: 100%; height: 100%; display: grid; gap: 10px; align-content: start; text-align: start; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-card); box-shadow: var(--shadow-xs); transition: all .25s var(--ease); animation-name: fade-in-up; animation-duration: .5s; animation-timing-function: var(--ease-out); animation-fill-mode: both; }
+.agent-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-md); } .agent-card.selected { border-color: var(--accent); box-shadow: var(--shadow-teal); } .agent-card.gone { opacity: .6; }
+.card-top { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.agent-avatar { display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--r-md); object-fit: cover; color: #fff; font-weight: 700; flex-shrink: 0; }
+.agent-copy { min-width: 0; flex: 1; display: grid; } strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slug { font-size: 11.5px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.description { font-size: 12.5px; color: var(--text-secondary); min-height: 2.8em; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.pill { font-size: 11.5px; padding: 2px 8px; border-radius: var(--r-full); background: var(--slate-100); color: var(--slate-700); white-space: nowrap; flex-shrink: 0; }
+.pill.active { background: #ecfdf5; color: #047857; } .pill.deleted { background: #fff1f2; color: #be123c; } .pill.model { background: var(--teal-50); color: var(--teal-700); overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; }
+.updated { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--text-tertiary); white-space: nowrap; }
+.skeleton-card { height: 128px; border-radius: var(--r-lg); background: linear-gradient(90deg, var(--bg-subtle) 25%, var(--bg-hover) 50%, var(--bg-subtle) 75%); background-size: 200% 100%; animation: shimmer 1.5s linear infinite; }
+.empty { display: grid; justify-items: center; gap: 8px; padding: 64px 0; color: var(--text-tertiary); } .empty p { margin: 0; font-size: 13.5px; }
+.error-card { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 14px; border-radius: var(--r-md); background: #fff1f2; color: #be123c; font-size: 13px; }
+.spin { animation: spin 1s linear infinite; }
+@media (max-width: 1200px) { .agent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 768px) { .agent-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 600px) { .agent-management { padding: 14px 12px; } h1 { font-size: 18px; } .create-text { display: none; } .primary { width: 40px; padding: 0; } .empty .primary { width: auto; padding: 8px 16px; }
+  .management-toolbar { margin: 14px 0 12px; } .filter-pills { width: 100%; } input { font-size: 16px; } }
+@media (prefers-reduced-motion: reduce) { .agent-card, .skeleton-card, .spin { animation: none; } .primary:hover { transform: none; } }
 </style>

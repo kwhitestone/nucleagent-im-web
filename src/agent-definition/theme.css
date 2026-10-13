@@ -2,6 +2,7 @@
   .agent-management, .definition-drawer, .agent-effective {
     color-scheme: dark;
     --bg-card: Canvas;
+    --bg: Canvas;
     --bg-subtle: color-mix(in srgb, CanvasText 6%, Canvas);
     --bg-hover: color-mix(in srgb, CanvasText 10%, Canvas);
     --text-primary: CanvasText;

@@ -4,6 +4,7 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { X, Plus, RefreshCw } from "@lucide/vue";
 import DefinitionFields from "./DefinitionFields.vue";
+import SkillPicker from "./SkillPicker.vue";
 import { CreationDraft } from "./creation";
 import { buildChanges, reconcileBindings, validateChanges } from "./draft";
 import type { Catalog, DefinitionApi, Detail } from "./api";
@@ -70,7 +71,7 @@ onUnmounted(() => {
     <header><h2 id="create-definition-title">{{ label('create') }}</h2>
       <button type="button" class="icon" :disabled="draft.busy || draft.frozen" :aria-label="label('close')" :title="label('close')" @click="close"><X :size="20" /></button></header>
     <div class="drawer-body">
-      <p>{{ label('newNote') }}</p>
+      <p class="new-note">{{ label('newNote') }}</p>
       <p v-if="draft.error" role="alert">{{ label(draft.error as MessageKey) }}</p>
       <section v-if="discard" role="alertdialog" :aria-label="label('discard')">
         <h3>{{ label('discard') }}</h3>
@@ -83,10 +84,7 @@ onUnmounted(() => {
           :readonly-fields="[]" :backends="backends.map(b => ({ value: b.id, label: b.displayName }))"
           :providers="providerChoices" :models="modelChoices" :busy="locked" @change="change" />
         <fieldset v-if="catalog.capabilities.readSkills"><legend>{{ label('skills') }}</legend>
-          <label v-for="skill in catalog.skills" :key="skill.id" class="check">
-            <input type="checkbox" :checked="draft.bindings?.some(b => b.skillId === skill.id)" :disabled="locked || !catalog.capabilities.writeSkillBindings"
-              @change="bind(skill.id, ($event.target as HTMLInputElement).checked)" />{{ skill.name }}
-          </label>
+          <SkillPicker :skills="catalog.skills" :selected="(draft.bindings ?? []).map(b => b.skillId)" :editable="!locked && catalog.capabilities.writeSkillBindings" @toggle="bind" />
         </fieldset>
       </template>
     </div>

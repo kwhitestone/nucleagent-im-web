@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
-import { nextTick } from "vue";
 import { loadComponent, render } from "./render.ts";
 import { DefinitionError, type Detail } from "../src/agent-definition/api.ts";
 import { definitionFields } from "../src/agent-definition/draft.ts";
@@ -17,16 +16,16 @@ const detail = (over: Partial<Detail["definition"]> = {}) => ({
 }) as unknown as Detail;
 const impact = { instances: 0, conversations: 0, conversations_7d: 0, skill_bindings: 0, im_groups: 0, deliverables: 0, unavailable: [], counted_at: "now" };
 
-async function mountDrawer(api: Record<string, unknown>, record = detail(), locale = "en") {
+async function mountDrawer(api: Record<string, unknown>, record = detail(), before?: (bindings: any) => void) {
   const originalDocument = globalThis.document;
   globalThis.document = { activeElement: null } as unknown as Document;
   const drawer = await loadComponent("src/agent-definition/DefinitionDrawer.vue") as { setup: Function };
   const setup = drawer.setup;
   let bindings: any;
-  drawer.setup = function (props: unknown, context: unknown) { bindings = setup(props, context); return bindings; };
+  drawer.setup = function (props: unknown, context: unknown) { bindings = setup(props, context); before?.(bindings); return bindings; };
   try {
-    const html = await render(drawer, { detail: record, api }, locale);
-    return { html, bindings, rerender: () => render(drawer, { detail: record, api }, locale), restore: () => { drawer.setup = setup; globalThis.document = originalDocument; } };
+    const html = await render(drawer, { detail: record, api }, "en");
+    return { html, bindings, restore: () => { drawer.setup = setup; globalThis.document = originalDocument; } };
   } catch (error) { drawer.setup = setup; globalThis.document = originalDocument; throw error; }
 }
 
@@ -60,11 +59,8 @@ test("the drawer shows grouped navigation and keeps backend paths and hashes out
 });
 
 test("editing shows an unsaved badge, a dirty dot on the group and the discard button", async () => {
-  const { bindings, rerender, restore } = await mountDrawer({});
+  const { html, restore } = await mountDrawer({}, detail(), b => b.change("/config/prompt", "new prompt"));
   try {
-    bindings.change("/config/prompt", "new prompt");
-    await nextTick();
-    const html = await rerender();
     assert.match(html, /aria-live="polite"[^>]*>[^<]*Unsaved 1/);
     assert.match(html, /data-group="persona"[^>]*>[\s\S]*?class="dirty-dot"/);
   } finally { restore(); }
@@ -82,7 +78,7 @@ test("regression: saving through the impact confirmation patches once with the e
   const record = detail();
   const patches: unknown[] = [];
   const saved = { ...record, definition: { ...record.definition, name: "two", revision: "2" }, etag: '"agent-1-2"' } as Detail;
-  const { bindings, rerender, restore } = await mountDrawer({
+  const { bindings, restore } = await mountDrawer({
     impact: async () => impact, detail: async () => record,
     patch: async (current: Detail, changes: unknown) => { patches.push([current.etag, changes]); return saved; },
   }, record);
@@ -94,15 +90,16 @@ test("regression: saving through the impact confirmation patches once with the e
     assert.deepEqual(patches, [['"agent-1-1"', { "/name": "two" }]]);
     assert.equal(bindings.status.value, "saved");
     assert.equal(bindings.editor.dirty, false);
-    assert.match(await rerender(), /role="status"[^>]*>[\s\S]*Saved/);
   } finally { restore(); }
+  const shown = await mountDrawer({}, record, b => { b.status.value = "saved"; });
+  try { assert.match(shown.html, /role="status"[^>]*>[\s\S]*Saved · applies/); } finally { shown.restore(); }
 });
 
 test("regression: a 412 save refreshes and shows the side-by-side conflict card, keeping my change", async () => {
   const record = detail();
   const current = { ...record, definition: { ...record.definition, name: "theirs", revision: "2" }, etag: '"agent-1-2"' } as Detail;
   let reads = 0;
-  const { bindings, rerender, restore } = await mountDrawer({
+  const { bindings, restore } = await mountDrawer({
     impact: async () => impact, detail: async () => (reads++ === 0 ? record : current),
     patch: async () => { throw new DefinitionError(412, "precondition"); },
   }, record);
@@ -113,11 +110,14 @@ test("regression: a 412 save refreshes and shows the side-by-side conflict card,
     await bindings.confirmAction();
     assert.equal(bindings.editor.current?.etag, '"agent-1-2"');
     assert.equal(bindings.editor.changes["/name"], "mine");
-    const html = await rerender();
+  } finally { restore(); }
+  const shown = await mountDrawer({}, record, b => { b.change("/name", "mine"); b.editor.acceptRefresh(current); });
+  try {
+    const html = shown.html;
     assert.match(html, /class="conflict-card/);
     assert.match(html, /class="conflict-option[^"]*"[\s\S]*mine[\s\S]*theirs/);
     assert.doesNotMatch(html, /<legend><code>\/name<\/code>/);
-  } finally { restore(); }
+  } finally { shown.restore(); }
 });
 
 test("Ctrl+S only saves when saving is allowed; Escape routes through the discard confirmation", async () => {
