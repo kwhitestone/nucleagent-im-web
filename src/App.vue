@@ -35,6 +35,7 @@ import {
   imSession,
   listGroups,
   provisionAddress,
+  recipientEnabled,
   refreshSession,
   renewsSameUser,
   type ConnectSession,
@@ -79,7 +80,7 @@ import { channelKey, useConversationBatch } from "./hiding";
 import { carryPersisted, earlierCursor, mergeMessages, messageKey, remintGuard } from "./history";
 import { AgentDirectory, uncontactedAgents, type DirectoryAgent } from "./agents";
 import { buildOutgoingText } from "./mentions";
-import { recipientDisabledKey, sendToEnabledRecipient } from "./send";
+import { isAgentUnavailableNotice, recipientDisabledKey, sendToEnabledRecipient } from "./send";
 import { isAgentRelayed, readProvenance, rejectionCopy } from "./provenance";
 import {
   applyAgentStreamEvent,
@@ -214,6 +215,16 @@ const draft = ref("");
 const sending = ref(false);
 const recipientDisabled = ref(false);
 watch([activeChannel, draft], () => { recipientDisabled.value = false; });
+// AGENT-REPLY-1: a DM with a stopped/deleted agent keeps its history readable but
+// greys the composer. Best effort: a failed check leaves it open (the send gate and
+// the server notice still apply).
+const peerUnavailable = ref(false);
+watch([activeChannel, session], async ([channel, current]) => {
+  peerUnavailable.value = false;
+  if (!channel || !current || channel.channelType !== ChannelTypePerson || !isAgentUid(channel.channelID)) return;
+  const enabled = await recipientEnabled(channel.channelID, current).catch(() => true);
+  if (activeChannel.value === channel && session.value === current) peerUnavailable.value = !enabled;
+});
 const mentionedAgentUids = ref<string[]>([]);
 const loadingHistory = ref(false);
 const historyFinished = ref(false);
@@ -1294,6 +1305,9 @@ async function sendMessage(): Promise<void> {
       scrollToBottom();
     }, mentionUids);
     if (current()) recipientDisabled.value = outcome === "disabled";
+    if (outcome === "disabled" && channel.channelType === ChannelTypePerson && isAgentUid(channel.channelID)) {
+      peerUnavailable.value = true;
+    }
     if (outcome === "unavailable") console.warn("im_recipient_check_unavailable");
   } catch (error) {
     if (current()) loginError.value = error instanceof Error ? error.message : t("composer.errSend");
@@ -1976,9 +1990,12 @@ onBeforeUnmount(() => {
             </template>
           </p>
 
+          <template v-for="message in messages" :key="messageKey(message)">
+          <SystemLine v-if="isAgentUnavailableNotice(message.content)" calm data-testid="agent-unavailable-notice">
+            {{ t("system.agentUnavailable") }}<br><small>{{ t("system.agentUnavailableHint") }}</small>
+          </SystemLine>
           <article
-            v-for="message in messages"
-            :key="messageKey(message)"
+            v-else
             class="message"
             :class="{ own: isOwnMessage(message), agent: isAgentMessage(message), located: message.messageSeq === locatedSeq }"
             :data-seq="message.messageSeq"
@@ -2008,6 +2025,7 @@ onBeforeUnmount(() => {
               <time>{{ messageTime(message) }}</time>
             </span>
           </article>
+          </template>
 
           <template v-for="response in liveResponses" :key="response.sourceKey">
             <!-- Belongs to this conversation, so it sits in the timeline rather
@@ -2070,8 +2088,9 @@ onBeforeUnmount(() => {
             <textarea
               v-model="draft"
               :readonly="sending"
+              :disabled="peerUnavailable"
               :aria-label="t('composer.label')"
-              :placeholder="activeAgents.length ? t('composer.placeholderAgents') : t('composer.placeholder')"
+              :placeholder="peerUnavailable ? t('composer.agentDisabled') : activeAgents.length ? t('composer.placeholderAgents') : t('composer.placeholder')"
               rows="2"
               @keydown.enter.exact.prevent="sendMessage"
             />
@@ -2079,7 +2098,7 @@ onBeforeUnmount(() => {
           <button
             class="primary send"
             type="submit"
-            :disabled="sending || !draft.trim() || connection !== 'connected'"
+            :disabled="sending || peerUnavailable || !draft.trim() || connection !== 'connected'"
           >
             {{ t("composer.send") }}
           </button>

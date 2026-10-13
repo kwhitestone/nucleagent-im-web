@@ -1,8 +1,14 @@
 import { recipientEnabled, type ConnectSession } from "./api.ts";
 
-/** Composer hint for a refused DM: an agent account is disabled only when its definition is deleted. */
+/** Composer hint for a refused DM: stopping or deleting a definition both disable its agent account. */
 export function recipientDisabledKey(isAgent: boolean): string {
-  return isAgent ? "composer.agentDeleted" : "composer.recipientDisabled";
+  return isAgent ? "composer.agentDisabled" : "composer.recipientDisabled";
+}
+
+/** The fixed notice nucleagent-im posts for a stopped/deleted agent (AGENT-REPLY-1). */
+export function isAgentUnavailableNotice(content: unknown): boolean {
+  const payload = (content as { contentObj?: Record<string, unknown> } | undefined)?.contentObj;
+  return payload?.systemNotice === "agent_unavailable";
 }
 
 // This protects our client, not arbitrary SDK clients. A transport-wide veto

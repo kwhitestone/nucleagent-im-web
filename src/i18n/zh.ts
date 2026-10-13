@@ -150,10 +150,12 @@ export default {
     removeMention: "取消呼叫 {'@'}{name}",
     errSend: "消息发送失败",
     recipientDisabled: "此账号暂不能接收消息。",
-    agentDeleted: "智能体已删除，不能再接收消息；历史消息仍可查看。",
+    agentDisabled: "该智能体已停用",
     label: "消息",
   },
   system: {
+    agentUnavailable: "该智能体已停用",
+    agentUnavailableHint: "如需继续使用，请联系它的创建者或管理员",
     rateLimited: "请求过于频繁，请稍候再呼叫该智能体。",
     depthExceeded: "智能体转交已停止：本轮达到转交深度上限。",
     budgetExceeded: "智能体转交已暂停：本轮对话达到每小时消息预算。",

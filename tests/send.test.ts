@@ -51,9 +51,9 @@ test("recipient gate blocks before SDK, retries only on demand, and cancels stal
   }
 });
 
-test("AG1-B2: a DM to a disabled agent account is refused before the SDK and reads as deleted", async () => {
+test("AG1-B2: a DM to a disabled agent account is refused before the SDK and reads as disabled (AGENT-REPLY-1)", async () => {
   const { recipientDisabledKey } = await import("../src/send.ts");
-  assert.equal(recipientDisabledKey(true), "composer.agentDeleted");
+  assert.equal(recipientDisabledKey(true), "composer.agentDisabled");
   assert.equal(recipientDisabledKey(false), "composer.recipientDisabled");
 });
 

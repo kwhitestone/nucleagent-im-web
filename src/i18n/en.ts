@@ -150,10 +150,12 @@ export default {
     removeMention: "Remove mention {'@'}{name}",
     errSend: "Message send failed",
     recipientDisabled: "This account cannot receive messages.",
-    agentDeleted: "This agent has been deleted and cannot receive messages. Past messages stay readable.",
+    agentDisabled: "This agent has been disabled.",
     label: "Message",
   },
   system: {
+    agentUnavailable: "This agent has been disabled.",
+    agentUnavailableHint: "Contact its owner or an admin to use it again.",
     rateLimited: "Too many requests to this agent. Please wait a moment.",
     depthExceeded: "Agent hand-off stopped: the chain reached its depth limit.",
     budgetExceeded: "Agent hand-off paused: this chain hit its hourly message budget.",

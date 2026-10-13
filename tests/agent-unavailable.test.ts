@@ -29,7 +29,7 @@ test("App renders the notice as a system line and greys the composer", () => {
   const app = readFileSync(new URL("../src/App.vue", import.meta.url), "utf8");
   assert.match(app, /<SystemLine v-if="isAgentUnavailableNotice\(message\.content\)"[^>]*calm/);
   assert.match(app, /:disabled="peerUnavailable"/);
-  assert.match(app, /peerUnavailable \? t\("composer\.agentDisabled"\)/);
+  assert.match(app, /peerUnavailable \? t\('composer\.agentDisabled'\)/);
   const send = readFileSync(new URL("../src/send.ts", import.meta.url), "utf8");
   assert.doesNotMatch(send, /only when its definition is deleted/);
 });
