@@ -48,7 +48,7 @@ function harness(visibleAfter = 3791, fail = false) {
     ...im, WKSDK, console: { warn: (...args: unknown[]) => warnings.push(args) },
     session: { value: session }, connection: { value: "connected" },
     activeChannel: { value: new Channel("new", 2) }, draft: { value: "hello" },
-    conversations: { value: [] }, messages: { value: [] }, mentionedAgentUids: { value: [] },
+    conversations: { value: [] }, messages: { value: [] }, mentionedAgentUids: { value: [] }, mentionedPersonUids: { value: [] },
     loginError: { value: "" }, sending: { value: false }, recipientDisabled: { value: false },
     hasMoreConversations: { value: true }, loadingConversations: { value: false },
     viewGeneration: 0, document: { visibilityState: "visible" },

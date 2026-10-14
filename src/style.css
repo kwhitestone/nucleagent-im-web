@@ -2338,3 +2338,30 @@ kbd {
     display: none;
   }
 }
+
+/* IM-FIX-1: @ people in the picker, and messages / rows that @ the viewer. */
+.mention-who {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.mention-who img {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-full);
+  object-fit: cover;
+}
+
+.mention-menu span.person {
+  color: var(--text-secondary);
+}
+
+.bubble.mention-me {
+  box-shadow: inset 3px 0 0 var(--im-agent-fg);
+}
+
+.mention-me-tag {
+  color: var(--rose-500);
+  font-weight: 600;
+}

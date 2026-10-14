@@ -114,9 +114,10 @@ test("new group agents feed the mention picker and encode their UID for group di
   const app = readFileSync("src/App.vue", "utf8");
   assert.match(app, /:directory-agents="directoryAgents"/);
   assert.match(app, /activeGroupMembers\.value\.filter\(\(member\) => member\.accountType === "agent"\)/);
-  assert.match(app, /const mentionSuggestions = computed[\s\S]*?activeAgents\.value\.filter/);
+  // IM-FIX-1: the picker lists every group member (agents first), not only agents.
+  assert.match(app, /const mentionSuggestions = computed[\s\S]*?mentionCandidates\(activeGroupMembers\.value/);
   assert.match(app, /async function groupChanged[\s\S]*?loadActiveGroupMembers/);
-  assert.match(app, /function insertMention[\s\S]*?String\(agent\.uid\)/);
+  assert.match(app, /function insertMention[\s\S]*?String\(member\.uid\)[\s\S]*?accountType === "agent" \? mentionedAgentUids/);
   const content = buildOutgoingText("@Test agent reply", ChannelTypeGroup, [String(member.uid)]);
   assert.deepEqual(JSON.parse(new TextDecoder().decode(content.encode())).mention, { uids: ["37"] });
 });

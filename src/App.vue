@@ -79,7 +79,7 @@ import { configureSDK, loadMoreConversations, markRead, reconcileAckedConversati
 import { channelKey, useConversationBatch } from "./hiding";
 import { carryPersisted, earlierCursor, mergeMessages, messageKey, remintGuard } from "./history";
 import { AgentDirectory, uncontactedAgents, type DirectoryAgent } from "./agents";
-import { buildOutgoingText } from "./mentions";
+import { buildOutgoingText, mentionCandidates, mentionsMe } from "./mentions";
 import { throttle, unknownGroup } from "./groupSync";
 import { isAgentUnavailableNotice, recipientDisabledKey, sendToEnabledRecipient } from "./send";
 import { isAgentRelayed, readProvenance, rejectionCopy } from "./provenance";
@@ -227,6 +227,8 @@ watch([activeChannel, session], async ([channel, current]) => {
   if (activeChannel.value === channel && session.value === current) peerUnavailable.value = !enabled;
 });
 const mentionedAgentUids = ref<string[]>([]);
+// IM-FIX-1: @-mentioned people, kept apart from agents (no task, no recipient-enabled gate).
+const mentionedPersonUids = ref<string[]>([]);
 const loadingHistory = ref(false);
 const historyFinished = ref(false);
 const loadingConversations = ref(false);
@@ -588,10 +590,7 @@ const mentionQuery = computed(() => {
 });
 const mentionSuggestions = computed(() => {
   if (mentionQuery.value === null) return [];
-  return activeAgents.value.filter((agent) => {
-    const name = `${agent.displayName} ${agent.username}`.toLocaleLowerCase();
-    return name.includes(mentionQuery.value!);
-  });
+  return mentionCandidates(activeGroupMembers.value, session.value?.uid || "", mentionQuery.value);
 });
 
 function messageText(message?: Message): string {
@@ -1171,6 +1170,7 @@ async function openChannel(channel: Channel, around?: number): Promise<void> {
   messages.value = [];
   draft.value = "";
   mentionedAgentUids.value = [];
+  mentionedPersonUids.value = [];
   historyFinished.value = false;
   loadingHistory.value = true;
   startAgentStream(channel, generation);
@@ -1282,17 +1282,17 @@ async function loadEarlier(): Promise<void> {
   }
 }
 
-function insertMention(agent: GroupMember): void {
-  const name = agent.displayName || agent.username;
+function insertMention(member: GroupMember): void {
+  const name = member.displayName || member.username;
   draft.value = draft.value.replace(/@[^@\s]*$/, `@${name} `);
-  const uid = String(agent.uid);
-  if (!mentionedAgentUids.value.includes(uid)) {
-    mentionedAgentUids.value = [...mentionedAgentUids.value, uid];
-  }
+  const uid = String(member.uid);
+  const list = member.accountType === "agent" ? mentionedAgentUids : mentionedPersonUids;
+  if (!list.value.includes(uid)) list.value = [...list.value, uid];
 }
 
 function removeMention(uid: string): void {
   mentionedAgentUids.value = mentionedAgentUids.value.filter((item) => item !== uid);
+  mentionedPersonUids.value = mentionedPersonUids.value.filter((item) => item !== uid);
 }
 
 async function sendMessage(): Promise<void> {
@@ -1304,14 +1304,15 @@ async function sendMessage(): Promise<void> {
   const generation = viewGeneration;
   const originalDraft = draft.value;
   const mentionUids = mentionedAgentUids.value;
+  const personUids = mentionedPersonUids.value;
   const current = () => generation === viewGeneration && session.value === sendSession
     && connection.value === "connected" && draft.value === originalDraft
-    && mentionedAgentUids.value === mentionUids;
+    && mentionedAgentUids.value === mentionUids && mentionedPersonUids.value === personUids;
   sending.value = true;
   recipientDisabled.value = false;
   try {
     const outcome = await sendToEnabledRecipient(channel, sendSession, current, async () => {
-      const content = buildOutgoingText(text, channel.channelType, mentionUids);
+      const content = buildOutgoingText(text, channel.channelType, mentionUids, personUids);
       // The SDK shows it at once (message listener); the draft goes only once it is on the server.
       const message = await sendAcked(content, channel);
       // Finish the bounded projection check before "sent" lets the user close this tab.
@@ -1320,6 +1321,7 @@ async function sendMessage(): Promise<void> {
       if (!current()) return;
       draft.value = "";
       mentionedAgentUids.value = [];
+      mentionedPersonUids.value = [];
       messages.value = mergeMessages(messages.value, [message]);
       scrollToBottom();
     }, mentionUids);
@@ -1843,7 +1845,7 @@ onBeforeUnmount(() => {
                 {{ t("badge.agent") }}
               </span>
             </span>
-            <small>{{ conversationSubtitle(conversation) || t("empty.noMessages") }}</small>
+            <small><span v-if="conversation.unread && mentionsMe(conversation.lastMessage?.content, session?.uid || '')" class="mention-me-tag" data-testid="mention-me">{{ t("list.mentionMe") }}</span>{{ conversationSubtitle(conversation) || t("empty.noMessages") }}</small>
           </span>
           <span class="conversation-end">
             <span class="conversation-time">{{ conversationTime(conversation) }}</span>
@@ -2040,7 +2042,7 @@ onBeforeUnmount(() => {
                 <span v-if="isAgentMessage(message)" class="tag agent">{{ t("badge.agent") }}</span>
                 <span v-if="relayLabel(message)" class="tag relay">{{ relayLabel(message) }}</span>
               </span>
-              <div class="bubble">{{ messageText(message) }}</div>
+              <div class="bubble" :class="{ 'mention-me': !isOwnMessage(message) && mentionsMe(message.content, session?.uid || '') }">{{ messageText(message) }}</div>
               <time>{{ messageTime(message) }}</time>
             </span>
           </article>
@@ -2080,9 +2082,9 @@ onBeforeUnmount(() => {
 
         <form class="composer" @submit.prevent="sendMessage">
           <div class="composer-input">
-            <div v-if="mentionedAgentUids.length" class="mention-chips">
+            <div v-if="mentionedAgentUids.length || mentionedPersonUids.length" class="mention-chips">
               <button
-                v-for="uid in mentionedAgentUids"
+                v-for="uid in [...mentionedAgentUids, ...mentionedPersonUids]"
                 :key="uid"
                 class="selection"
                 type="button"
@@ -2094,14 +2096,17 @@ onBeforeUnmount(() => {
             </div>
             <div v-if="mentionSuggestions.length" class="mention-menu" role="listbox">
               <button
-                v-for="agent in mentionSuggestions"
-                :key="agent.uid"
+                v-for="member in mentionSuggestions"
+                :key="member.uid"
                 type="button"
                 role="option"
-                @click="insertMention(agent)"
+                @click="insertMention(member)"
               >
-                <strong>{{ agent.displayName || agent.username }}</strong>
-                <span>{{ t("badge.agent") }}</span>
+                <span class="mention-who">
+                  <img v-if="member.avatar" :src="member.avatar" alt="" />
+                  <strong>{{ member.displayName || member.username }}</strong>
+                </span>
+                <span :class="{ person: member.accountType !== 'agent' }">{{ t(member.accountType === "agent" ? "badge.agent" : "badge.member") }}</span>
               </button>
             </div>
             <textarea
@@ -2128,7 +2133,7 @@ onBeforeUnmount(() => {
           <p class="composer-hint">
             <span><kbd>Enter</kbd> {{ t("composer.hintSend") }}</span>
             <span><kbd>Shift</kbd>+<kbd>Enter</kbd> {{ t("composer.hintNewline") }}</span>
-            <span v-if="activeAgents.length"><kbd>@</kbd> {{ t("composer.hintMention") }}</span>
+            <span v-if="activeGroupMembers.length > 1"><kbd>@</kbd> {{ t("composer.hintMention") }}</span>
           </p>
         </form>
       </template>

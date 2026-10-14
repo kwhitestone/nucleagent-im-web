@@ -45,6 +45,7 @@ export default {
     searchPlaceholder: "Search chats, contacts, {'@'}username, messages and files",
     you: "You:",
     unreadLabel: "{count} unread",
+    mentionMe: "[Mentioned you] ",
     newGroup: "New group",
   },
   search: {
@@ -78,6 +79,7 @@ export default {
   },
   badge: {
     agent: "Agent",
+    member: "Member",
     person: "Person",
     agentCount: "{count} agents",
     uid: "UID",
@@ -142,11 +144,11 @@ export default {
   },
   composer: {
     placeholder: "Write a message…",
-    placeholderAgents: "Write a message, type {'@'} to mention an agent",
+    placeholderAgents: "Write a message, type {'@'} to mention an agent or member",
     send: "Send",
     hintSend: "send",
     hintNewline: "newline",
-    hintMention: "mention agent",
+    hintMention: "mention agent or member",
     removeMention: "Remove mention {'@'}{name}",
     errSend: "Message send failed",
     recipientDisabled: "This account cannot receive messages.",

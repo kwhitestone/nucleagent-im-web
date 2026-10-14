@@ -46,6 +46,7 @@ export default {
     searchPlaceholder: "搜索会话、联系人、{'@'}用户名、消息和文件",
     you: "你:",
     unreadLabel: "{count} 条未读",
+    mentionMe: "[有人@我] ",
     newGroup: "新建群聊",
   },
   search: {
@@ -78,6 +79,7 @@ export default {
   },
   badge: {
     agent: "智能体",
+    member: "成员",
     person: "联系人",
     agentCount: "智能体 ×{count}",
     uid: "UID",
@@ -142,11 +144,11 @@ export default {
   },
   composer: {
     placeholder: "写点什么…",
-    placeholderAgents: "写点什么，输入 {'@'} 呼叫智能体",
+    placeholderAgents: "写点什么，输入 {'@'} 呼叫智能体或成员",
     send: "发送",
     hintSend: "发送",
     hintNewline: "换行",
-    hintMention: "呼叫智能体",
+    hintMention: "呼叫智能体或成员",
     removeMention: "取消呼叫 {'@'}{name}",
     errSend: "消息发送失败",
     recipientDisabled: "此账号暂不能接收消息。",
