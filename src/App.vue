@@ -80,6 +80,7 @@ import { channelKey, useConversationBatch } from "./hiding";
 import { carryPersisted, earlierCursor, mergeMessages, messageKey, remintGuard } from "./history";
 import { AgentDirectory, uncontactedAgents, type DirectoryAgent } from "./agents";
 import { buildOutgoingText } from "./mentions";
+import { throttle, unknownGroup } from "./groupSync";
 import { isAgentUnavailableNotice, recipientDisabledKey, sendToEnabledRecipient } from "./send";
 import { isAgentRelayed, readProvenance, rejectionCopy } from "./provenance";
 import {
@@ -726,6 +727,8 @@ const conversationListener: ConversationListener = (conversation, action) => {
   // A message from someone else un-hides the row on the server; the viewer's own does not.
   if (!batch.receive(conversation, session.value?.uid || "")) return;
   upsertConversation(conversation);
+  // IM-FIX-1: a group the viewer was just added to is not in `groups` until listGroups runs again.
+  if (unknownGroup(conversation.channel, groups.value)) void refreshGroups();
 };
 
 const messageListener: MessageListener = (message) => {
@@ -735,6 +738,12 @@ const messageListener: MessageListener = (message) => {
     scrollToBottom();
     // R6: the server counted it unread; the user is looking at it.
     if (!isOwnMessage(message)) markChannelRead(message.channel);
+    // IM-FIX-1: no member-change event reaches the client; a sender the list lacks means it is stale.
+    const group = activeGroup.value;
+    if (group && activeGroupMembers.value.length && message.fromUID
+      && !activeGroupMembers.value.some((member) => String(member.uid) === message.fromUID)) {
+      void refreshMembers(group);
+    }
   }
 };
 
@@ -1072,6 +1081,13 @@ async function syncGroups(): Promise<void> {
   }
 }
 
+// IM-FIX-1: event-driven refreshes, at most one listGroups / one member read per group every 3 s.
+const groupsOnce = throttle(3000);
+const membersOnce = throttle(3000);
+const refreshGroups = () => groupsOnce("groups", syncGroups);
+const refreshMembers = (group: IMGroup) =>
+  membersOnce(String(group.id), () => loadActiveGroupMembers(group, viewGeneration));
+
 async function loadActiveGroupMembers(group: IMGroup, generation: number): Promise<void> {
   if (!session.value) return;
   try {
@@ -1166,6 +1182,9 @@ async function openChannel(channel: Channel, around?: number): Promise<void> {
   const group = groups.value.find((item) => item.wukongChannelId === channel.channelID);
   if (channel.channelType === ChannelTypeGroup && group) {
     void loadActiveGroupMembers(group, generation);
+  } else if (unknownGroup(channel, groups.value)) {
+    // syncGroups loads the members once the group is listed (still this channel, none loaded yet).
+    void refreshGroups();
   }
 
   try {
