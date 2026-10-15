@@ -12,6 +12,7 @@ import { createI18n } from "vue-i18n";
 import zh from "../src/i18n/zh.ts";
 import en from "../src/i18n/en.ts";
 import { resetNames } from "../src/names.ts";
+import { useAccountPopover } from "../src/accountPopover.ts";
 import { loadComponent } from "./render.ts";
 
 class El {
@@ -61,7 +62,8 @@ async function mount(memberCount = 50) {
   (globalThis as any).ResizeObserver = class {
     o: Observer;
     constructor(cb: () => void) { this.o = { cb, targets: [], disconnected: false }; observers.push(this.o); }
-    observe(el: unknown) { this.o.targets.push(el); }
+    // A real ResizeObserver ignores observing the same node twice; so does this fake.
+    observe(el: unknown) { if (!this.o.targets.includes(el)) this.o.targets.push(el); }
     unobserve(el: unknown) { this.o.targets = this.o.targets.filter((t) => t !== el); }
     disconnect() { this.o.disconnected = true; this.o.targets = []; }
   };
@@ -143,11 +145,18 @@ test("card observer: empty area never scrolls; a later card from a deep row brin
 
 test("card observer: closing the panel (v-if unmount) disconnects it; reopening starts one fresh observer", async () => {
   const m = await mount();
+  // The panel shares the app-wide card layer (same module instance as the component's import).
+  const popover = useAccountPopover();
+  const close = popover.close;
+  let closes = 0;
+  popover.close = () => { closes++; };
   try {
     m.click(m.rows()[40]); m.card(true);
     const first = m.observers[0];
+    assert.equal(closes, 0, "opening a card does not close the layer");
     await m.setOpen(false);
     assert.equal(m.rows().length, 0, "the panel is really gone");
+    assert.equal(closes, 1, "the panel's member card is closed with the panel, once");
     assert.equal(first.disconnected, true, "the closed panel's observer is disconnected");
     assert.equal(m.live().length, 0, "nothing left observing");
     await m.setOpen(true);
@@ -156,5 +165,5 @@ test("card observer: closing the panel (v-if unmount) disconnects it; reopening 
     assert.equal(m.observers.length, 2);
     assert.equal(m.live().length, 1, "exactly one live observer after reopening");
     assert.deepEqual(m.scrolled(), [[30, { block: "nearest" }]], "the new panel follows its own row");
-  } finally { await m.done(); }
+  } finally { popover.close = close; await m.done(); }
 });
