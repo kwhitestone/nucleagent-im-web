@@ -251,3 +251,46 @@ test("the rail's self card gets the masked phone from resolve", async () => {
   const { readFileSync } = await import("node:fs");
   assert.match(readFileSync("src/components/IdentityCard.vue", "utf8"), /phoneMasked: phoneMaskedOf\(props\.uid\)/);
 });
+
+// IM-SEARCH-MERGE-WINDOW-FIX R1: auth limits name search per user (60/min).
+// A 429 is "too many searches", never "nobody found": it throws RateLimited
+// and is not turned into the contacts fallback.
+test("429 from directory search throws RateLimited and does not fall back to contacts", async () => {
+  const { RateLimited } = await import("../src/api.ts") as { RateLimited?: new () => Error };
+  assert.equal(typeof RateLimited, "function", "api exports RateLimited");
+  for (const q of ["王小", "138 1234"]) {
+    const f = stubFetch([[429, { code: 429, message: "too many requests" }]]);
+    try { await assert.rejects(searchDirectory(q, session), (e) => e instanceof RateLimited!); } finally { f.restore(); }
+    assert.equal(f.calls.length, 1, `${q}: no contacts fallback`);
+  }
+});
+
+const rlPrev = { id: 5, username: "", displayName: "王小峰", accountType: "human", provisioned: true, phoneMasked: "139****0005" };
+
+test("picker: a 429 keeps the shown results and says so in the user's language", async () => {
+  for (const [locale, hint] of [["zh", "搜索太频繁"], ["en", "Too many searches"]] as const) {
+    const target = ContactPicker as { setup: (p: unknown, c: unknown) => Record<string, { value: unknown } & (() => Promise<void>)> };
+    const original = target.setup;
+    const f = stubFetch([[429, { code: 429, message: "too many requests" }], [429, { code: 429, message: "too many requests" }]]);
+    target.setup = async function patched(this: unknown, p: unknown, c: unknown) {
+      const b = original.call(this, p, c);
+      b.query.value = "王小";
+      b.results.value = [rlPrev];
+      b.hasMore.value = true;
+      await (b.more as unknown as () => Promise<void>)();
+      await (b.find as unknown as (v: string, g: number) => Promise<void>)("王小峰", 0);
+      return b;
+    };
+    let html = "";
+    try { html = await render(ContactPicker, { session }, locale); } finally { target.setup = original; f.restore(); }
+    assert.match(html, /王小峰/, `${locale}: previous result kept`);
+    assert.match(html, new RegExp(hint), `${locale}: rate-limit hint`);
+    assert.doesNotMatch(html, /没有找到|没有匹配|Nothing matches|Nothing found/, `${locale}: not shown as nobody`);
+  }
+});
+
+test("picker: a 429 on the first search says so instead of 没有匹配", async () => {
+  const html = await renderPicker({ query: "王小", rateLimited: true, results: [] });
+  assert.match(html, /搜索太频繁/);
+  assert.doesNotMatch(html, /没有匹配/);
+});

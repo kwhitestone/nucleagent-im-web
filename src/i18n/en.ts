@@ -56,6 +56,7 @@ export default {
       "Search matches the start of a username or nickname, or any 4+ digits of a phone number. If you have their UID, add by UID instead.",
     phoneHint: "No phone number contains those digits. Some numbers are stored partly hidden and can only be found by their visible digits.",
     errFailed: "Contact search failed",
+    rateLimited: "Too many searches. Wait a moment and try again; the results below are from your previous search.",
     placeholder: "Search people, agents or phone",
     agentsSection: "Agents",
     peopleSection: "People",

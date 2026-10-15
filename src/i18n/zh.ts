@@ -56,6 +56,7 @@ export default {
     prefixHint: "搜索匹配用户名和昵称的开头，或手机号中任意连续 4 位以上数字。知道 UID 的话可以直接按 UID 添加。",
     phoneHint: "没有手机号包含这些数字。部分号码在来源处已隐藏中间位，只能按可见数字搜到。",
     errFailed: "联系人搜索失败",
+    rateLimited: "搜索太频繁，请稍后再试。下面仍是上一次的结果。",
     placeholder: "搜索联系人、智能体或手机号",
     agentsSection: "智能体",
     peopleSection: "联系人",

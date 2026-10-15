@@ -213,3 +213,61 @@ test("S2: a message hit opens the chat around that message (messagesync both way
   assert.match(app, /@message="\(hit\) => openFromSearch\(hit\.channel, hit\.seq\)"/);
 });
 import "./search-return.checks.ts";
+
+// IM-SEARCH-MERGE-WINDOW-FIX R1: a 429 from the directory keeps the people
+// already shown and says why, in both languages; it is never the empty state.
+test("R1: a rate-limited directory search keeps the previous people and shows a clear hint, not 没有找到", async () => {
+  for (const [locale, hint] of [["zh", zh.search.rateLimited], ["en", en.search.rateLimited]] as const) {
+    assert.ok(hint, `${locale}: search.rateLimited`);
+    const stub = stubFetch((url) => url.includes("/directory/search") ? 429 : { messages: [], total: 0, next_cursor: "" });
+    const target = Panel as { setup: (p: unknown, c: unknown) => Record<string, { value: unknown }> };
+    const original = target.setup;
+    target.setup = async function patched(this: unknown, p: unknown, c: unknown) {
+      const b = original.call(this, p, c);
+      // A search that answered, then the user types on and the next one is limited.
+      let first = true;
+      stub.restore();
+      const inner = stubFetch((url) => !url.includes("/directory/search") ? { messages: [], total: 0, next_cursor: "" }
+        : first ? (first = false, { code: 0, message: "success", data: { items: [{ id: 5, username: "", displayName: "王小峰", accountType: "human", provisioned: true }], page: 1, hasMore: false, degraded: false } })
+        : 429);
+      b.query.value = "王小";
+      await (b.search as unknown as () => Promise<void>)();
+      b.query.value = "王小峰";
+      b.people.value = []; // what the query watcher does on each keystroke
+      await (b.search as unknown as () => Promise<void>)();
+      inner.restore();
+      return b;
+    };
+    let html = "";
+    try { html = await render(Panel, { session, conversations: [], hiddenKeys: new Set(), agents: [], titleFor: () => "" }, locale); } finally { target.setup = original; stub.restore(); }
+    assert.match(html, /王小峰/, `${locale}: previous people kept`);
+    assert.ok(html.includes(hint), `${locale}: hint shown`);
+    assert.match(html, /data-testid="im-search-rate-limited"/);
+    assert.doesNotMatch(html, /data-testid="im-search-empty"/, `${locale}: not the empty state`);
+  }
+});
+
+// R2: two same-named accounts (enterprise + SMS) are told apart by what auth
+// already returns: the enterprise badge for portal-linked rows, the UID, and
+// the masked phone — never guessed from the name.
+test("R2: same-named contacts show their UID, source and masked phone", async () => {
+  const target = Panel as { setup: (p: unknown, c: unknown) => Record<string, { value: unknown }> };
+  const original = target.setup;
+  target.setup = function patched(this: unknown, p: unknown, c: unknown) {
+    const b = original.call(this, p, c);
+    b.query.value = "赖碧威";
+    b.loading.value = false;
+    b.people.value = [
+      { id: 11, portalUid: 1, username: "", displayName: "赖碧威", accountType: "human", provisioned: true, phoneMasked: null, openId: "nduc_nd_x" },
+      { id: 13, portalUid: 101, username: "", displayName: "赖碧威", accountType: "human", provisioned: true, phoneMasked: "138****0001", openId: "nduc_sms_x" },
+      { id: 0, portalUid: 7, username: "", displayName: "赖碧", accountType: "human", provisioned: false, phoneMasked: "139****0007", openId: "nduc_sms_y" },
+    ];
+    return b;
+  };
+  let html = "";
+  try { html = await render(Panel, { session, conversations: [], hiddenKeys: new Set(), agents: [], titleFor: () => "" }); } finally { target.setup = original; }
+  assert.match(html, /UID 11/);
+  assert.match(html, /UID 13 · 138\*\*\*\*0001/);
+  assert.match(html, /企业账号 · 139\*\*\*\*0007 · 尚未加入/);
+  assert.doesNotMatch(html, /13800000001|nduc_/, "no raw phone, no open_id on screen");
+});

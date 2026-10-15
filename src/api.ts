@@ -265,12 +265,16 @@ export interface DirectoryPage {
 /** 404 from an auth directory route: the directory is switched off for this env. */
 export class NotFound extends Error {}
 
+/** 429 from an auth directory route: too many searches this minute (per user). Not "nobody found". */
+export class RateLimited extends Error {}
+
 async function authGet<T>(path: string, session: ConnectSession, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${authBase}${path}`, {
     ...init,
     headers: { Authorization: session.jwt, ...(init.body ? { "Content-Type": "application/json" } : {}) },
   });
   if (response.status === 404) throw new NotFound();
+  if (response.status === 429) throw new RateLimited();
   return readEnvelope<T>(response);
 }
 

@@ -6,12 +6,14 @@ import {
   minContactQueryLength,
   phoneDigits,
   provisionContact,
+  RateLimited,
   searchDirectory,
   type ConnectSession,
   type Contact,
   type DirectoryEntry,
 } from "../api";
-import { ensureNames, handleFor, isEnterprise, nameFor } from "../names";
+import { ensureNames, nameFor } from "../names";
+import { directorySub } from "../directorySub";
 import { matchAgents, uncontactedAgents, type DirectoryAgent } from "../agents";
 import type { ProfileTarget } from "../accountPopover";
 
@@ -50,12 +52,14 @@ const error = ref("");
 const page = ref(1);
 const hasMore = ref(false);
 const degraded = ref(false);
+const rateLimited = ref(false); // R1: auth answered 429; results are the last good ones
 let timer: ReturnType<typeof setTimeout> | undefined;
 let generation = 0;
 
 watch(query, (value) => {
   if (timer) clearTimeout(timer);
   error.value = "";
+  rateLimited.value = false;
   if (value.trim().length < minContactQueryLength) {
     generation += 1;
     results.value = [];
@@ -64,24 +68,30 @@ watch(query, (value) => {
   }
   const current = ++generation;
   loading.value = true;
-  timer = setTimeout(async () => {
-    try {
-      const found = await searchDirectory(value, props.session);
-      if (current !== generation) return;
-      page.value = 1;
-      hasMore.value = found.hasMore;
-      degraded.value = found.degraded;
-      results.value = visible(found.items);
-    } catch (cause) {
-      if (current === generation) {
-        error.value = cause instanceof Error ? cause.message : t("search.errFailed");
-        results.value = [];
-      }
-    } finally {
-      if (current === generation) loading.value = false;
-    }
-  }, 250);
+  timer = setTimeout(() => void find(value, current), 250);
 });
+
+async function find(value: string, current: number): Promise<void> {
+  try {
+    const found = await searchDirectory(value, props.session);
+    if (current !== generation) return;
+    page.value = 1;
+    hasMore.value = found.hasMore;
+    degraded.value = found.degraded;
+    rateLimited.value = false;
+    results.value = visible(found.items);
+  } catch (cause) {
+    if (current !== generation) return;
+    // R1: a 429 keeps the people already listed and says why; never "nobody".
+    if (cause instanceof RateLimited) rateLimited.value = true;
+    else {
+      error.value = cause instanceof Error ? cause.message : t("search.errFailed");
+      results.value = [];
+    }
+  } finally {
+    if (current === generation) loading.value = false;
+  }
+}
 
 // Agents match on name or description (contains, not prefix): users remember
 // what an agent does more often than its exact name. Shown once, so the same
@@ -124,11 +134,14 @@ async function more(): Promise<void> {
   try {
     const found = await searchDirectory(query.value, props.session, page.value + 1);
     if (current !== generation) return;
+    rateLimited.value = false;
     page.value = found.page;
     hasMore.value = found.hasMore;
     results.value = [...results.value, ...visible(found.items)];
   } catch (cause) {
-    if (current === generation) error.value = cause instanceof Error ? cause.message : t("search.errFailed");
+    if (current !== generation) return;
+    if (cause instanceof RateLimited) rateLimited.value = true;
+    else error.value = cause instanceof Error ? cause.message : t("search.errFailed");
   } finally {
     if (current === generation) loading.value = false;
   }
@@ -196,19 +209,9 @@ function rowName(contact: Contact): string {
     || contact.displayName || contact.username;
 }
 
-// Board §04: the least needed to tell same-named people apart — the real
-// @username (resolved; never portal_<uuid>), else "Enterprise"; then the UID.
-function rowSub(contact: DirectoryEntry): string {
-  const uid = String(contact.id);
-  const handle = handleFor(uid, contact.username);
-  const lead = handle ? `@${handle}` : isEnterprise(uid) ? t("badge.enterprise") : "";
-  return [lead, `${t("badge.uid")} ${uid}`, contact.phoneMasked].filter(Boolean).join(" · ");
-}
-
-/** Portal-only rows: enterprise, the masked phone when there is one, then not joined. */
-function portalSub(contact: DirectoryEntry): string {
-  return [t("badge.enterprise"), contact.phoneMasked, t("badge.notJoined")].filter(Boolean).join(" · ");
-}
+// Same-named people told apart (board §04): see directorySub.
+const rowSub = (contact: DirectoryEntry): string => directorySub(contact, t);
+const portalSub = rowSub;
 
 // Digits typed (a phone number): ask phones for the phone keypad.
 // ponytail: iOS applies a changed inputmode only on the next focus; a
@@ -363,6 +366,7 @@ onBeforeUnmount(() => {
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
         </button>
       </div>
+      <p v-if="rateLimited" class="picker-status error" role="status" data-testid="im-picker-rate-limited">{{ t("search.rateLimited") }}</p>
       <button v-if="hasMore" class="quiet contact-more" type="button" @click="more">{{ t("search.more") }}</button>
       <p v-if="degraded" class="picker-status">{{ t("search.degraded") }}</p>
     </div>
@@ -370,6 +374,7 @@ onBeforeUnmount(() => {
          nothing looked identical to one still in flight. The copy states that
          matching is prefix-only: searching mid-string silently returns nobody
          and otherwise reads as "this person does not exist". -->
+    <p v-else-if="rateLimited" class="picker-status error" role="status" data-testid="im-picker-rate-limited">{{ t("search.rateLimited") }}</p>
     <div v-else-if="query.trim().length >= minContactQueryLength && !agentMatches.length" class="picker-empty">
       <p>{{ t("search.noResults", { query: query.trim() }) }}</p>
       <small>{{ t(phoneSearch ? "search.phoneHint" : "search.prefixHint") }}</small>

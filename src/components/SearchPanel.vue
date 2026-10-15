@@ -6,9 +6,10 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { ChannelTypeGroup, ChannelTypePerson, type Conversation } from "wukongimjssdk";
-import { searchDirectory, type ConnectSession, type DirectoryEntry } from "../api";
+import { RateLimited, searchDirectory, type ConnectSession, type DirectoryEntry } from "../api";
 import { matchAgents, type DirectoryAgent } from "../agents";
 import { nameFor } from "../names";
+import { directorySub } from "../directorySub";
 import {
   clearRecentSearches,
   countLabel,
@@ -54,6 +55,9 @@ const active = ref(0);
 const recent = ref(loadRecentSearches(props.session.uid));
 const loading = ref(false);
 const error = ref("");
+// R1: auth answered 429 for the people search; the people shown are the last good ones.
+const rateLimited = ref(false);
+let lastPeople: DirectoryEntry[] = []; // the last people search that answered
 const people = ref<DirectoryEntry[]>([]);
 const messages = ref<MessageHit[]>([]);
 const files = ref<MessageHit[]>([]);
@@ -117,6 +121,7 @@ watch(query, () => {
   clearTimeout(timer);
   active.value = 0;
   error.value = "";
+  rateLimited.value = false;
   generation += 1;
   people.value = [];
   messages.value = [];
@@ -134,13 +139,21 @@ async function search(): Promise<void> {
   error.value = "";
   try {
     if (mode.value === "full") {
+      // A 429 keeps whatever people were shown and says so (never "nothing
+      // found"); any other directory failure still degrades to no people.
+      let limited = false;
       const [dir, msg, file] = await Promise.all([
-        searchDirectory(q, props.session).catch(() => ({ items: [] as DirectoryEntry[] })),
+        searchDirectory(q, props.session).catch((cause) => {
+          limited = cause instanceof RateLimited;
+          return { items: limited ? lastPeople : [] as DirectoryEntry[] };
+        }),
         messageSearch(q, "message", props.session),
         messageSearch(q, "file", props.session),
       ]);
       if (mine !== generation) return;
+      rateLimited.value = limited;
       people.value = dir.items;
+      if (!limited) lastPeople = dir.items;
       messages.value = msg.hits;
       files.value = file.hits;
       totals.value = { messages: msg.total, files: file.total };
@@ -298,6 +311,11 @@ defineExpose({ focus: () => input.value?.focus() });
           <button class="quiet" type="button" data-testid="im-search-retry" @click="retry">{{ t("search.retry") }}</button>
         </div>
 
+        <div v-if="rateLimited" class="search-status error" role="status" data-testid="im-search-rate-limited">
+          <span>{{ t("search.rateLimited") }}</span>
+          <button class="quiet" type="button" @click="retry">{{ t("search.retry") }}</button>
+        </div>
+
         <section v-for="group in groups" :key="group.name" class="search-group" :data-testid="`im-search-group-${group.name}`">
           <p class="search-section">
             <span>{{ t(`search.tabs.${group.name}`) }}</span>
@@ -326,7 +344,7 @@ defineExpose({ focus: () => input.value?.focus() });
               <RowAvatar :id="String(row.entry.id)" :name="row.title" kind="person" />
               <span class="search-copy">
                 <strong><template v-for="(segment, i) in markSegments(row.title, titleMatch(row.title, query) || [])" :key="i"><mark v-if="segment.hit">{{ segment.text }}</mark><template v-else>{{ segment.text }}</template></template></strong>
-                <small v-if="row.entry.username">@{{ row.entry.username }}</small>
+                <small>{{ directorySub(row.entry, t) }}</small>
               </span>
               <span v-if="hiddenKeys.has(`${ChannelTypePerson}:${row.entry.id}`)" class="account-badge hidden-tag">{{ t("hide.tag") }}</span>
               <span class="account-badge person">{{ t("badge.person") }}</span>
@@ -371,7 +389,7 @@ defineExpose({ focus: () => input.value?.focus() });
         <div v-if="loading" class="search-skeleton" data-testid="im-search-skeleton" aria-busy="true">
           <span v-for="n in 4" :key="n" class="skeleton-row"><i /><b /></span>
         </div>
-        <div v-else-if="!loading && !error && !hasResults" class="search-status" data-testid="im-search-empty">
+        <div v-else-if="!loading && !error && !rateLimited && !hasResults" class="search-status" data-testid="im-search-empty">
           <strong>{{ t("search.empty", { query: query.trim() }) }}</strong>
           <p>{{ t("search.emptyRules") }}</p>
         </div>
