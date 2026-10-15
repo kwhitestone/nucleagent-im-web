@@ -167,3 +167,16 @@ test("card observer: closing the panel (v-if unmount) disconnects it; reopening 
     assert.deepEqual(m.scrolled(), [[30, { block: "nearest" }]], "the new panel follows its own row");
   } finally { popover.close = close; await m.done(); }
 });
+
+test("card observer: closing the panel while its member card is still loading closes the layer too", async () => {
+  const m = await mount();
+  const popover = useAccountPopover();
+  const close = popover.close;
+  let closes = 0;
+  popover.close = () => { closes++; };
+  try {
+    m.click(m.rows()[40]); // card requested; account-ui has not put it into the area yet
+    await m.setOpen(false);
+    assert.equal(closes, 1, "a card still loading does not outlive the panel");
+  } finally { popover.close = close; await m.done(); }
+});
