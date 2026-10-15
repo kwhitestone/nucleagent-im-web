@@ -1416,7 +1416,9 @@ kbd {
   display: flex;
   flex-direction: column;
   width: min(620px, 100%);
-  max-height: min(760px, calc(100dvh - 40px));
+  /* Fixed, not max-height: when the picker list closes on pointerdown the panel
+   * must not shrink and re-centre, or the footer moves before mouseup. */
+  height: min(760px, calc(100dvh - 40px));
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--r-lg);

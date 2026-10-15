@@ -24,6 +24,11 @@ test("G1: group dialog is a flex column, the body scrolls inside it, the footer 
   const dialog = decls(".group-dialog");
   assert.equal(dialog.display, "flex");
   assert.equal(dialog["flex-direction"], "column");
+  // A fixed height, not max-height: the picker list closing on pointerdown must
+  // not shrink and re-centre the panel, or the footer button moves before
+  // mouseup and the click is lost (seen in the browser acceptance).
+  const base = css.replace(/@media[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, "");
+  assert.equal(decls(".group-dialog", base).height, "min(760px, calc(100dvh - 40px))");
   const body = decls(".dialog-body");
   assert.match(body.flex ?? "", /^1\b/);
   assert.equal(body["min-height"], "0");
