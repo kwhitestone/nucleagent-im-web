@@ -46,7 +46,7 @@ export default {
     searchPlaceholder: "搜索会话、联系人、{'@'}用户名、消息和文件",
     you: "你:",
     unreadLabel: "{count} 条未读",
-    mentionMe: "[有人@我] ",
+    mentionMe: "[有人{'@'}我] ",
     newGroup: "新建群聊",
   },
   search: {

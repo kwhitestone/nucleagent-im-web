@@ -119,3 +119,41 @@ test("every message compiles with zero errors in both locales", async () => {
   }
   assert.deepEqual(errors, []);
 });
+
+// IMWEB-I18N-FIX-1 render regression: the conversation-row tag exactly as App.vue
+// writes it (App.vue is too stateful to mount whole), rendered for an unread chat
+// whose last message @-mentions me. Any i18n compile complaint fails the test.
+test("an unread chat whose last message @s me renders the [有人@我] tag", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { compile, createSSRApp } = await import("vue");
+  const { renderToString } = await import("vue/server-renderer");
+  const { mentionsMe } = await import("../src/mentions.ts");
+  const app = readFileSync(new URL("../src/App.vue", import.meta.url), "utf8");
+  const tag = app.match(/<span v-if="conversation\.unread && mentionsMe\([^]*?<\/span>/)?.[0];
+  assert.ok(tag?.includes('data-testid="mention-me"'), "mention-me tag not found in App.vue");
+  const complaints: string[] = [];
+  const original = { error: console.error, warn: console.warn };
+  console.error = console.warn = (...a: unknown[]) => { complaints.push(a.map(String).join(" ")); };
+  try {
+    for (const [locale, label] of [["zh", "[有人@我] "], ["en", "[Mentioned you] "]] as const) {
+      const vm = createSSRApp({
+        render: compile(`<div>${tag}</div>`),
+        setup: () => ({
+          conversation: { unread: 2, lastMessage: { content: { mention: { uids: ["12"] } } } },
+          session: { uid: "12" },
+          mentionsMe,
+          t: i18n(locale),
+        }),
+      });
+      vm.config.errorHandler = (e) => { complaints.push(String(e)); };
+      const html = await renderToString(vm);
+      assert.ok(html.includes('data-testid="mention-me"'), `${locale}: tag not rendered: ${html}`);
+      assert.ok(html.includes(`>${label}</span>`), `${locale}: wrong label: ${html}`);
+    }
+  } finally { Object.assign(console, original); }
+  assert.deepEqual(complaints, []);
+});
+
+function i18n(locale: "zh" | "en") {
+  return createI18n({ legacy: false, locale, fallbackLocale: "zh", messages: { zh, en } as never }).global.t;
+}
