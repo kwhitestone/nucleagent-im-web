@@ -193,7 +193,8 @@ export function profileParams(
  */
 export function profileActions(
   target: Pick<ProfileTarget, "uid" | "openId" | "select">,
-  context: { selfUid: string; dmUid?: string },
+  /** inGroup: opened from the group panel, where "Add to group" would drop that panel (G3). */
+  context: { selfUid: string; dmUid?: string; inGroup?: boolean },
 ): { select: boolean; message: boolean; addToGroup: boolean } {
   if (target.select) return { select: true, message: false, addToGroup: false };
   // An openId-only target is never self: the signed-in user always has a uid row.
@@ -201,6 +202,6 @@ export function profileActions(
   return {
     select: false,
     message: other && !(target.uid && target.uid === context.dmUid),
-    addToGroup: other && !!target.uid,
+    addToGroup: other && !!target.uid && !context.inGroup,
   };
 }

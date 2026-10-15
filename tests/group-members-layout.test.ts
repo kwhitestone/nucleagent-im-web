@@ -84,17 +84,14 @@ async function mount(memberCount: number) {
   const Dialog = await loadComponent("src/components/GroupDialog.vue") as Component;
   const setup = Dialog.setup;
   const events: any[][] = [];
-  let state!: Record<string, any>;
-  Dialog.setup = (props, context) => {
-    state = setup(props, { ...context, emit: (...args: any[]) => events.push(args) });
-    state.members.value = [human(1), agent, ...Array.from({ length: memberCount - 2 }, (_, i) => human(100 + i))];
-    state.loading.value = false;
-    return state;
-  };
-  const draw = () => render(Dialog, { session, group });
-  await draw();
-  return {
-    state, events, calls, draw,
+  // Every render() is a fresh instance: `patch` replays the state under test.
+  let patch: (state: Record<string, any>) => void = () => {};
+  const m = {
+    state: {} as Record<string, any>, events, calls,
+    draw(next?: (state: Record<string, any>) => void) {
+      if (next) patch = next;
+      return render(Dialog, { session, group });
+    },
     async done() {
       await new Promise((resolve) => setTimeout(resolve, 20));
       globalThis.fetch = original;
@@ -102,6 +99,15 @@ async function mount(memberCount: number) {
       resetNames();
     },
   };
+  Dialog.setup = (props, context) => {
+    const state = setup(props, { ...context, emit: (...args: any[]) => events.push(args) });
+    state.members.value = [human(1), agent, ...Array.from({ length: memberCount - 2 }, (_, i) => human(100 + i))];
+    state.loading.value = false;
+    patch(state);
+    return (m.state = state);
+  };
+  await m.draw();
+  return m;
 }
 
 for (const n of [2, 30, 80]) {
@@ -126,8 +132,7 @@ test("picker view replaces the member list (never both at once) and Esc steps ba
     let html = await m.draw();
     assert.match(html, /class="member-list"/);
     assert.doesNotMatch(html, /class="contact-picker/);
-    m.state.view.value = "add";
-    html = await m.draw();
+    html = await m.draw((state) => { state.view.value = "add"; });
     assert.match(html, /class="contact-picker/);
     assert.doesNotMatch(html, /class="member-list"/);
     assert.doesNotMatch(html, /im-group-save/, "the add view's footer is add/cancel, not save");
@@ -142,16 +147,15 @@ test("picker view replaces the member list (never both at once) and Esc steps ba
 test("remove asks first: one click arms an inline confirm, only the confirm deletes, Esc disarms", async () => {
   const m = await mount(3);
   try {
+    const html = await m.draw((state) => { state.removing.value = 100; });
     const target = m.state.members.value[2];
-    m.state.removing.value = target.uid;
-    const html = await m.draw();
     assert.match(html, /data-testid="im-member-remove-confirm"/);
     assert.equal(m.calls.filter((c) => c.method === "DELETE").length, 0, "arming does not delete");
     m.state.onKey(esc());
     assert.equal(m.state.removing.value, undefined);
     assert.equal(m.events.length, 0, "Esc disarms, it does not close the panel");
     await m.state.removeMember(target);
-    assert.ok(m.calls.some((c) => c.method === "DELETE" && /\/groups\/8\/members\/102$/.test(c.path)));
+    assert.ok(m.calls.some((c) => c.method === "DELETE" && /\/groups\/8\/members\/100$/.test(c.path)));
   } finally { await m.done(); }
 });
 

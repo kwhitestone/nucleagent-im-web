@@ -1358,6 +1358,7 @@ function openProfile(anchor: HTMLElement, target: ProfileTarget): void {
   const can = profileActions(target, {
     selfUid: session.value.uid,
     dmUid: channel?.channelType === ChannelTypePerson ? channel.channelID : undefined,
+    inGroup: groupDialogOpen.value && !!dialogGroup.value,
   });
   const contact = (): Contact => ({
     id: Number(uid), username: target.known?.username ?? "",

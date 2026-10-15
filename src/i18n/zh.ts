@@ -174,6 +174,7 @@ export default {
     searchMembers: "搜索联系人",
     owner: "群主",
     remove: "移除",
+    removeConfirm: "确认移除",
     leave: "退出群聊",
     delete: "解散群聊",
     allowlistTitle: "谁可以呼叫 {agent}",
