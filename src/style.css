@@ -1583,6 +1583,19 @@ kbd {
   accent-color: var(--accent);
 }
 
+/* G2: the member card renders here, between header and list, never over a row.
+ * The shared card fills it in place (account-ui `host`); empty = no space taken. */
+.group-card-host {
+  flex: none;
+  max-height: 45%;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--border);
+}
+
+.group-card-host:empty {
+  display: none;
+}
+
 .dialog-actions {
   display: flex;
   flex: none;

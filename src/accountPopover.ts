@@ -41,6 +41,8 @@ export interface ProfileCardParams {
   onMessage?: () => void;
   onAddToGroup?: () => void;
   onSelect?: () => void;
+  /** Render in place inside this element instead of a body layer (shell contract; older shells ignore it). */
+  host?: HTMLElement;
 }
 
 export interface ProfileCardMount {
@@ -71,6 +73,8 @@ export interface ProfileTarget {
   known?: ProfileCardParams["known"];
   /** Picker ⓘ: the card's primary action picks this person. */
   select?: () => void;
+  /** The group panel's card area: the card renders there, not over the member list (G2). */
+  host?: HTMLElement;
 }
 
 export interface LoaderDeps {
@@ -180,7 +184,7 @@ export function useAccountPopover(): AccountPopover {
 export function profileParams(
   session: ConnectSession,
   locale: "zh" | "en",
-  target: Pick<ProfileCardParams, "openId" | "uid" | "portalUid" | "known" | "onMessage" | "onAddToGroup" | "onSelect">,
+  target: Pick<ProfileCardParams, "openId" | "uid" | "portalUid" | "known" | "onMessage" | "onAddToGroup" | "onSelect" | "host">,
 ): ProfileCardParams {
   return { ...target, auth: { base: authBase, token: session.jwt }, locale };
 }

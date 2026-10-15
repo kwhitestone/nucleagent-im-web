@@ -1376,7 +1376,7 @@ function openProfile(anchor: HTMLElement, target: ProfileTarget): void {
     }
   };
   void accountUi.openProfile(anchor, profileParams(session.value, getLocale(), {
-    openId, uid, portalUid: openId ? undefined : target.portalUid, known: target.known,
+    openId, uid, portalUid: openId ? undefined : target.portalUid, known: target.known, host: target.host,
     onSelect: can.select ? target.select : undefined,
     onMessage: can.message ? () => void message() : undefined,
     onAddToGroup: !can.addToGroup ? undefined : () => {

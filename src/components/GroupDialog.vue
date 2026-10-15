@@ -44,6 +44,8 @@ const selected = ref<Contact[]>([...(props.preselect ?? [])]);
 const members = ref<GroupMember[]>([]);
 const allowlists = ref<Record<number, AgentAllowlist>>({});
 const allowlistDrafts = ref<Record<number, number[]>>({});
+/** Per-agent failure of the last Save (agent uid → message); those drafts stay unsaved. */
+const saveErrors = ref<Record<number, string>>({});
 const loading = ref(false);
 const saving = ref(false);
 const error = ref("");
@@ -51,6 +53,8 @@ const error = ref("");
 const view = ref<"members" | "add">("members");
 /** The member whose "Remove" is armed; only the inline confirm deletes. */
 const removing = ref<number>();
+/** Where a member's card renders: the panel's own area above the list, so it never covers a row (G2). */
+const cardHost = ref<HTMLElement>();
 
 const isOwner = computed(() => props.group?.creatorUid === Number(props.session.uid));
 const agents = computed(() => members.value.filter((member) => member.accountType === "agent"));
@@ -181,21 +185,46 @@ function toggleAllowlist(agentUid: number, memberUid: number): void {
   };
 }
 
-/** The footer's one Save writes every agent's allowlist. */
+const sameUids = (a: number[], b: number[]) => a.length === b.length && a.every((uid) => b.includes(uid));
+
+/**
+ * The footer's one Save writes only the agents this panel changed: the backend
+ * replaces a whole list, so resending an untouched agent's open-time snapshot
+ * would undo an edit made elsewhere meanwhile. People who left since the panel
+ * opened are dropped first (the backend 404s a list naming them). Each agent
+ * stands alone: a failure keeps that agent's draft and error, the rest still
+ * save, and Save again retries only what is still unsaved.
+ */
 async function saveAllowlists(): Promise<void> {
   if (!props.group || saving.value) return;
-  saving.value = true;
+  const group = props.group;
+  const dirty = agents.value.filter((agent) =>
+    !sameUids(allowlistDrafts.value[agent.uid] ?? [], allowlists.value[agent.uid]?.memberUids ?? []));
+  saveErrors.value = {};
   error.value = "";
+  if (!dirty.length) return;
+  saving.value = true;
   try {
-    for (const agent of agents.value) {
-      const allowlist = await replaceAgentAllowlist(
-        props.group.id,
-        agent.uid,
-        allowlistDrafts.value[agent.uid] || [],
-        props.session,
-      );
-      allowlists.value = { ...allowlists.value, [agent.uid]: allowlist };
+    members.value = (await getGroupMembers(group.id, props.session)).members;
+    const present = new Set(members.value.map((member) => member.uid));
+    const errors: Record<number, string> = {};
+    for (const agent of dirty.filter((item) => present.has(item.uid))) {
+      try {
+        const saved = await replaceAgentAllowlist(
+          group.id,
+          agent.uid,
+          allowlistDrafts.value[agent.uid].filter((uid) => present.has(uid)),
+          props.session,
+        );
+        allowlists.value = { ...allowlists.value, [agent.uid]: saved };
+        allowlistDrafts.value = { ...allowlistDrafts.value, [agent.uid]: [...saved.memberUids] };
+      } catch (cause) {
+        errors[agent.uid] = cause instanceof Error ? cause.message : t("group.errSave");
+      }
     }
+    saveErrors.value = errors;
+    const failed = dirty.filter((agent) => errors[agent.uid]).map(memberName);
+    if (failed.length) error.value = t("group.errSaveAgents", { agents: failed.join(", ") });
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : t("group.errSave");
   } finally {
@@ -216,6 +245,7 @@ function inspect(member: GroupMember, anchor: HTMLElement): void {
       nickName: memberName(member), username: member.username, avatar: member.avatar,
       accountType: member.accountType, provisioned: true,
     },
+    host: cardHost.value,
   });
 }
 
@@ -291,6 +321,7 @@ onBeforeUnmount(() => {
       </form>
 
       <template v-else>
+        <div ref="cardHost" class="group-card-host" data-testid="im-group-card-host" />
         <div class="dialog-body" data-testid="im-group-body">
           <p v-if="loading" class="loading">{{ t("chat.loading") }}</p>
           <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -386,6 +417,9 @@ onBeforeUnmount(() => {
                   >
                   {{ memberName(member) }}
                 </label>
+                <p v-if="saveErrors[agent.uid]" class="error" data-testid="im-allowlist-error" role="alert">
+                  {{ t("group.errSave") }}: {{ saveErrors[agent.uid] }}
+                </p>
                 <p v-if="!allowlistCandidates.length" class="picker-status">
                   {{ t("group.allowlistEmpty") }}
                 </p>

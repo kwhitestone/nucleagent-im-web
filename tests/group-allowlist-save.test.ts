@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { markRaw } from "vue";
 import { resetNames } from "../src/names.ts";
 import { loadComponent, render } from "./render.ts";
 
@@ -60,6 +61,8 @@ async function mount(opts: { creator?: number; failPutFor?: number } = {}) {
     const s = setup(props, { ...context, emit: (...a: any[]) => events.push(a) });
     if (!freeze) return (state = s);
     s.members.value = server.members; s.loading.value = false;
+    // mirror the live instance's save state (a fresh SSR instance starts empty)
+    for (const key of ["allowlists", "allowlistDrafts", "saveErrors"]) if (s[key] && state[key]) s[key].value = state[key].value;
     return s;
   };
   const g = { ...group, creatorUid: opts.creator ?? 1 };
@@ -223,7 +226,7 @@ test("R9 G2: a member's card opens in the panel's own card area, not as a body l
     assert.ok(host < html.indexOf('data-testid="im-group-body"'), "outside (above) the scrolling member list");
     assert.ok(host < html.indexOf('data-testid="im-group-footer"'));
     const anchor = { tag: "row" } as unknown as HTMLElement;
-    const cardHost = { tag: "host" } as unknown as HTMLElement;
+    const cardHost = markRaw({ tag: "host" }) as unknown as HTMLElement; // a real element is never proxied either
     m.s.cardHost.value = cardHost;
     m.s.inspect({ ...bot(37) }, anchor);
     const [name, a, target] = m.events.at(-1)!;

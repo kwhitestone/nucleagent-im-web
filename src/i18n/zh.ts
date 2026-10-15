@@ -188,6 +188,7 @@ export default {
     errMembers: "群成员加载失败",
     errCreate: "群聊创建失败",
     errSave: "保存失败",
+    errSaveAgents: "以下智能体的呼叫名单未保存：{agents}。其余已保存，可再次点击保存重试。",
   },
   hide: {
     listMenu: "更多",
