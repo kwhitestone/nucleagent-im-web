@@ -284,7 +284,7 @@ onBeforeUnmount(() => {
       autocomplete="off"
       @focus="openBrowse"
       @click="openBrowse"
-      @keydown.esc="open = false"
+      @keydown.esc="open && ($event.preventDefault(), open = false)"
     >
     <div v-if="multiple && modelValue.length" class="selected-contacts">
       <button

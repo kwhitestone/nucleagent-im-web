@@ -175,6 +175,7 @@ export default {
     searchMembers: "Search contacts",
     owner: "Owner",
     remove: "Remove",
+    removeConfirm: "Confirm remove",
     leave: "Leave group",
     delete: "Delete group",
     allowlistTitle: "Who can call {agent}",
@@ -188,6 +189,7 @@ export default {
     errMembers: "Group members could not be loaded",
     errCreate: "Group could not be created",
     errSave: "Save failed",
+    errSaveAgents: "Not saved for: {agents}. The others were saved; press Save again to retry.",
   },
   hide: {
     listMenu: "More",

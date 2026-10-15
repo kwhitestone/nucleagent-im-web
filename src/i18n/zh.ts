@@ -175,6 +175,7 @@ export default {
     searchMembers: "搜索联系人",
     owner: "群主",
     remove: "移除",
+    removeConfirm: "确认移除",
     leave: "退出群聊",
     delete: "解散群聊",
     allowlistTitle: "谁可以呼叫 {agent}",
@@ -188,6 +189,7 @@ export default {
     errMembers: "群成员加载失败",
     errCreate: "群聊创建失败",
     errSave: "保存失败",
+    errSaveAgents: "以下智能体的呼叫名单未保存：{agents}。其余已保存，可再次点击保存重试。",
   },
   hide: {
     listMenu: "更多",
