@@ -219,13 +219,19 @@ function inspect(member: GroupMember, anchor: HTMLElement): void {
   });
 }
 
+/** Back to the member list; unconfirmed picks are dropped (Cancel and Esc alike). */
+function leavePicker(): void {
+  view.value = "members";
+  selected.value = [];
+}
+
 // Esc steps back one layer: an armed remove, then the picker view, then the
 // panel. A layer above that already took the key (the shared profile card, the
 // picker's open list) marks it handled.
 function onKey(event: KeyboardEvent): void {
   if (event.key !== "Escape" || event.defaultPrevented) return;
   if (removing.value !== undefined) removing.value = undefined;
-  else if (view.value === "add") view.value = "members";
+  else if (view.value === "add") leavePicker();
   else emit("close");
 }
 
@@ -392,7 +398,7 @@ onBeforeUnmount(() => {
         <!-- Outside the scroll body: Save and Dissolve stay on screen at any member count (G1). -->
         <footer v-if="!loading" class="dialog-actions" data-testid="im-group-footer">
           <template v-if="view === 'add'">
-            <button class="quiet" type="button" :disabled="saving" @click="view = 'members'; selected = []">
+            <button class="quiet" type="button" :disabled="saving" @click="leavePicker">
               {{ t("hide.cancel") }}
             </button>
             <button class="primary" type="button" data-testid="im-group-add-confirm" :disabled="saving || !selected.length" @click="addMembers">

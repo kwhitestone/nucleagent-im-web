@@ -1595,8 +1595,15 @@ kbd {
 
 .dialog-actions button,
 .member-row button,
-.check-row {
+.check-row,
+.group-section-head button {
   min-height: 44px;
+}
+
+.dialog-header .icon-button {
+  width: 44px;
+  min-height: 44px;
+  height: 44px;
 }
 
 .group-section-head {

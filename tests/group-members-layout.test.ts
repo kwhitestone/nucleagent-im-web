@@ -44,7 +44,7 @@ test("phones: the group dialog is full screen and its actions are 44px touch tar
   assert.equal(dialog.height, "100%");
   assert.equal(dialog["max-height"], "none");
   assert.equal(decls(".dialog-backdrop", phone).padding, "0");
-  for (const sel of [".dialog-actions button", ".member-row button", ".check-row"]) {
+  for (const sel of [".dialog-actions button", ".member-row button", ".check-row", ".group-section-head button", ".dialog-header .icon-button"]) {
     assert.equal(decls(sel)["min-height"], "44px", `${sel} needs a 44px target`);
   }
 });
@@ -137,12 +137,13 @@ test("picker view replaces the member list (never both at once) and Esc steps ba
     let html = await m.draw();
     assert.match(html, /class="member-list"/);
     assert.doesNotMatch(html, /class="contact-picker/);
-    html = await m.draw((state) => { state.view.value = "add"; });
+    html = await m.draw((state) => { state.view.value = "add"; state.selected.value = [{ id: 500, username: "c", displayName: "C", accountType: "human" }]; });
     assert.match(html, /class="contact-picker/);
     assert.doesNotMatch(html, /class="member-list"/);
     assert.doesNotMatch(html, /im-group-save/, "the add view's footer is add/cancel, not save");
     m.state.onKey(esc());
     assert.equal(m.state.view.value, "members");
+    assert.deepEqual(m.state.selected.value, [], "leaving the picker drops its picks, like Cancel");
     assert.equal(m.events.length, 0, "Esc in the picker does not close the panel");
     m.state.onKey(esc());
     assert.deepEqual(m.events.at(-1), ["close"]);
