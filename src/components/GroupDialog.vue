@@ -193,7 +193,8 @@ const sameUids = (a: number[], b: number[]) => a.length === b.length && a.every(
  * would undo an edit made elsewhere meanwhile. People who left since the panel
  * opened are dropped first (the backend 404s a list naming them). Each agent
  * stands alone: a failure keeps that agent's draft and error, the rest still
- * save, and Save again retries only what is still unsaved.
+ * save, and Save again retries only what is still unsaved. The checkboxes stay
+ * live during a Save; an edit made meanwhile is not overwritten by the response.
  */
 async function saveAllowlists(): Promise<void> {
   if (!props.group || saving.value) return;
@@ -209,15 +210,19 @@ async function saveAllowlists(): Promise<void> {
     const present = new Set(members.value.map((member) => member.uid));
     const errors: Record<number, string> = {};
     for (const agent of dirty.filter((item) => present.has(item.uid))) {
+      const sent = allowlistDrafts.value[agent.uid];
       try {
         const saved = await replaceAgentAllowlist(
           group.id,
           agent.uid,
-          allowlistDrafts.value[agent.uid].filter((uid) => present.has(uid)),
+          sent.filter((uid) => present.has(uid)),
           props.session,
         );
         allowlists.value = { ...allowlists.value, [agent.uid]: saved };
-        allowlistDrafts.value = { ...allowlistDrafts.value, [agent.uid]: [...saved.memberUids] };
+        // A tick made while this PUT was in flight is newer than the response: keep it (unsaved).
+        if (sameUids(allowlistDrafts.value[agent.uid], sent)) {
+          allowlistDrafts.value = { ...allowlistDrafts.value, [agent.uid]: [...saved.memberUids] };
+        }
       } catch (cause) {
         errors[agent.uid] = cause instanceof Error ? cause.message : t("group.errSave");
       }
