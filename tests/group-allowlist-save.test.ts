@@ -138,6 +138,19 @@ test("R2b: a member who left is dropped from a changed agent's list instead of f
     assert.deepEqual(m.server.allow[37], [2], "saved without the departed member");
     assert.equal(m.s.error.value, "");
     assert.ok(!m.s.members.value.some((x: { uid: number }) => x.uid === 3), "the list drops the departed member");
+    const before = m.calls.length;
+    await m.s.saveAllowlists();
+    assert.equal(puts(m.calls.slice(before)).length, 0, "the draft follows what was saved: a second Save writes nothing");
+  } finally { await m.done(); }
+});
+
+test("R1c: swapping one person for another (same count) is a change and is saved", async () => {
+  const m = await mount();
+  try {
+    m.s.toggleAllowlist(37, 2); m.s.toggleAllowlist(37, 3); // [2] -> [3]
+    await m.s.saveAllowlists();
+    assert.deepEqual(m.server.allow[37], [3]);
+    assert.deepEqual(puts(m.calls).map((c) => c.path.match(/agents\/(\d+)/)![1]), ["37"]);
   } finally { await m.done(); }
 });
 
