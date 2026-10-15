@@ -105,3 +105,17 @@ test("rail tabs are line icons with labels, no emoji", async () => {
     assert.ok((en as Messages & { tab: Record<string, string> }).tab[key]);
   }
 });
+
+// IMWEB-I18N-FIX-1: t() only logs a compile error and returns a fallback, so the
+// render test above stays green on a broken message. Compile every message
+// directly and fail on any error — "[有人@我]" white-screened the IM in the app.
+test("every message compiles with zero errors in both locales", async () => {
+  const { baseCompile } = await import("@intlify/message-compiler");
+  const errors: string[] = [];
+  for (const [locale, keys] of [["zh", zhKeys], ["en", enKeys]] as const) {
+    for (const [key, message] of keys) {
+      baseCompile(message, { onError: (e: Error) => errors.push(`${locale}:${key}: ${e.message} in ${JSON.stringify(message)}`) });
+    }
+  }
+  assert.deepEqual(errors, []);
+});
