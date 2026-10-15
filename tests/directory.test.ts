@@ -294,3 +294,178 @@ test("picker: a 429 on the first search says so instead of 没有匹配", async 
   assert.match(html, /搜索太频繁/);
   assert.doesNotMatch(html, /没有匹配/);
 });
+
+// IM-SEARCH-N1: "显示更多" pages the query whose people are listed. After a
+// 429 on a new query the list is still the previous query's, so it must not
+// offer more: paging would fetch the new query's page 2 under the old rows
+// and skip its page 1. Synthetic directory, local fetch stub only.
+type Reply = number | { items: DirectoryEntry[]; hasMore: boolean };
+type Picker = Record<string, { value: unknown }> & {
+  generation: number;
+  find: (v: string, g: number) => Promise<void>;
+  more: () => Promise<void>;
+};
+
+function directoryNet(replies: Record<string, Array<Reply | Promise<Reply>>>) {
+  const asked: string[] = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input), "http://local");
+    const key = `${url.searchParams.get("q")}#${url.searchParams.get("page")}`;
+    asked.push(key);
+    const next = await replies[key]?.shift();
+    if (next === undefined) throw new Error(`unexpected request ${key}`);
+    const headers = { "Content-Type": "application/json" };
+    if (typeof next === "number") return new Response(JSON.stringify({ code: next, message: "x" }), { status: next, headers });
+    const data = { ...next, page: Number(url.searchParams.get("page")), degraded: false };
+    return new Response(JSON.stringify({ code: 0, message: "success", data }), { status: 200, headers });
+  };
+  return { asked, restore: () => { globalThis.fetch = original; } };
+}
+
+// SSR runs no non-immediate watch, so typing replays the query watcher's body.
+function typeQuery(b: Picker, value: string): Promise<void> {
+  b.query.value = value;
+  b.error.value = "";
+  b.rateLimited.value = false;
+  if (value.trim().length < 2) {
+    b.generation += 1;
+    b.results.value = [];
+    b.loading.value = false;
+    return Promise.resolve();
+  }
+  b.generation += 1;
+  b.loading.value = true;
+  return b.find(value, b.generation);
+}
+
+async function pickerScenario(replies: Record<string, Array<Reply | Promise<Reply>>>, script: (b: Picker) => Promise<void>) {
+  const net = directoryNet(replies);
+  const target = ContactPicker as { setup: (p: unknown, c: unknown) => unknown };
+  const original = target.setup;
+  target.setup = async function patched(this: unknown, p: unknown, c: unknown) {
+    const b = original.call(this, p, c) as Picker;
+    await script(b);
+    return b;
+  };
+  try { return { html: await render(ContactPicker, { session }), asked: net.asked }; } finally { target.setup = original; net.restore(); }
+}
+
+const A = (i: number) => person(i, true);       // 王小 rows: P01, P02
+const B = (i: number) => person(10 + i, true);  // 李四 rows: P11, P12
+
+test("N1: after a 429 on a new query the old rows stay but 显示更多 is gone", async () => {
+  const { html, asked } = await pickerScenario({
+    "王小#1": [{ items: [A(1)], hasMore: true }],
+    "李四#1": [429],
+    "李四#2": [{ items: [B(2)], hasMore: false }],
+  }, async (b) => {
+    await typeQuery(b, "王小");
+    await typeQuery(b, "李四");
+    if (b.hasMore.value) await b.more(); // the user clicks 显示更多 if it is offered
+  });
+  assert.match(html, /P01/, "previous rows kept");
+  assert.match(html, /搜索太频繁/);
+  assert.doesNotMatch(html, /P12/, "李四 page 2 not spliced under 王小's rows");
+  assert.doesNotMatch(html, /显示更多/, "no paging of 李四 under 王小's rows");
+  assert.deepEqual(asked, ["王小#1", "李四#1"], "李四 page 1 never skipped");
+});
+
+test("N1: retrying the new query after a 429 starts at its page 1, then pages 2", async () => {
+  const { html, asked } = await pickerScenario({
+    "王小#1": [{ items: [A(1)], hasMore: true }],
+    "王小#2": [{ items: [A(2)], hasMore: true }],
+    "李四#1": [429, { items: [B(1)], hasMore: true }],
+    "李四#2": [{ items: [B(2)], hasMore: false }],
+  }, async (b) => {
+    await typeQuery(b, "王小");
+    await b.more();
+    await typeQuery(b, "李四");
+    await typeQuery(b, "李四");
+    await b.more();
+  });
+  assert.deepEqual(asked, ["王小#1", "王小#2", "李四#1", "李四#1", "李四#2"], "no skipped page");
+  assert.match(html, /P11[\s\S]*P12/, "李四 page 1 then page 2");
+  assert.doesNotMatch(html, /P01|P02/, "no 王小 rows left");
+  assert.doesNotMatch(html, /搜索太频繁|显示更多/);
+});
+
+test("N1: a late 显示更多 answer for the old query is dropped after the new query's 429", async () => {
+  let answer!: (r: Reply) => void;
+  const { html, asked } = await pickerScenario({
+    "王小#1": [{ items: [A(1)], hasMore: true }],
+    "王小#2": [new Promise<Reply>((resolve) => { answer = resolve; })],
+    "李四#1": [429],
+  }, async (b) => {
+    await typeQuery(b, "王小");
+    const late = b.more();
+    await typeQuery(b, "李四");
+    answer({ items: [A(2)], hasMore: true });
+    await late;
+  });
+  assert.deepEqual(asked, ["王小#1", "王小#2", "李四#1"]);
+  assert.match(html, /P01/);
+  assert.doesNotMatch(html, /P02/, "late page dropped");
+  assert.doesNotMatch(html, /显示更多/);
+});
+
+test("N1: a late first-page answer for the old query does not replace the new one", async () => {
+  let answer!: (r: Reply) => void;
+  const { html } = await pickerScenario({
+    "王小#1": [new Promise<Reply>((resolve) => { answer = resolve; })],
+    "李四#1": [{ items: [B(1)], hasMore: false }],
+  }, async (b) => {
+    const late = typeQuery(b, "王小");
+    await typeQuery(b, "李四");
+    answer({ items: [A(1)], hasMore: true });
+    await late;
+  });
+  assert.match(html, /P11/);
+  assert.doesNotMatch(html, /P01|显示更多/);
+});
+
+test("N1: a 429 on 显示更多 itself keeps the button to retry the same page", async () => {
+  const { html, asked } = await pickerScenario({
+    "王小#1": [{ items: [A(1)], hasMore: true }],
+    "王小#2": [429, { items: [A(2)], hasMore: false }],
+  }, async (b) => {
+    await typeQuery(b, "王小");
+    await b.more();
+    assert.equal(b.hasMore.value, true, "retry stays offered");
+    assert.equal(b.rateLimited.value, true);
+    await b.more();
+  });
+  assert.deepEqual(asked, ["王小#1", "王小#2", "王小#2"]);
+  assert.match(html, /P01[\s\S]*P02/);
+  assert.doesNotMatch(html, /搜索太频繁|显示更多/);
+});
+
+test("N1: a 429 with nothing listed says so, with no 显示更多 and no 没有匹配", async () => {
+  const { html } = await pickerScenario({
+    "王小#1": [{ items: [A(1)], hasMore: true }],
+    "李四#1": [429],
+  }, async (b) => {
+    await typeQuery(b, "王小");
+    await typeQuery(b, "王");
+    await typeQuery(b, "李四");
+  });
+  assert.match(html, /搜索太频繁/);
+  assert.doesNotMatch(html, /显示更多|没有匹配|P01/);
+});
+
+test("N1: a late 429 for the old query's 显示更多 does not flag the new query's results", async () => {
+  let answer!: (r: Reply) => void;
+  const { html } = await pickerScenario({
+    "王小#1": [{ items: [A(1)], hasMore: true }],
+    "王小#2": [new Promise<Reply>((resolve) => { answer = resolve; })],
+    "李四#1": [{ items: [B(1)], hasMore: true }],
+  }, async (b) => {
+    await typeQuery(b, "王小");
+    const late = b.more();
+    await typeQuery(b, "李四");
+    answer(429);
+    await late;
+  });
+  assert.match(html, /P11[\s\S]*显示更多/, "李四 rows and its own paging");
+  assert.doesNotMatch(html, /搜索太频繁|P01/);
+});

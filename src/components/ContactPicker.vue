@@ -83,8 +83,12 @@ async function find(value: string, current: number): Promise<void> {
   } catch (cause) {
     if (current !== generation) return;
     // R1: a 429 keeps the people already listed and says why; never "nobody".
-    if (cause instanceof RateLimited) rateLimited.value = true;
-    else {
+    // N1: those rows are the previous query's, so no "show more": it would page
+    // this query from page 2 under them. Retyping retries from page 1.
+    if (cause instanceof RateLimited) {
+      rateLimited.value = true;
+      hasMore.value = false;
+    } else {
       error.value = cause instanceof Error ? cause.message : t("search.errFailed");
       results.value = [];
     }
