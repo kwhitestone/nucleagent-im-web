@@ -243,7 +243,20 @@ function memberName(member: GroupMember): string {
     || member.displayName || member.username;
 }
 
+// The card loads after the click and takes room from the list above the row, which can
+// push that row out of view. When the card area grows, bring the row back (no scroll
+// otherwise: the owner's own scrolling is left alone).
+let cardRow: HTMLElement | undefined;
+let cardObserver: ResizeObserver | undefined;
+
 function inspect(member: GroupMember, anchor: HTMLElement): void {
+  cardRow = anchor;
+  if (!cardObserver && cardHost.value && typeof ResizeObserver !== "undefined") {
+    cardObserver = new ResizeObserver(() => {
+      if (cardHost.value?.childElementCount) cardRow?.scrollIntoView({ block: "nearest" });
+    });
+    cardObserver.observe(cardHost.value);
+  }
   emit("profile", anchor, {
     uid: String(member.uid),
     known: {
@@ -273,6 +286,7 @@ function onKey(event: KeyboardEvent): void {
 onMounted(() => window.addEventListener("keydown", onKey));
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKey);
+  cardObserver?.disconnect();
   // The member card belongs to this panel: it does not outlive it over the chat.
   useAccountPopover().close();
 });
