@@ -25,8 +25,9 @@ const bot = (uid: number) => ({ uid, username: `b${uid}`, displayName: `B${uid}`
 async function mount(opts: { creator?: number; failPutFor?: number } = {}) {
   opts = { ...opts };
   const server = {
-    members: [human(1), human(2), human(3), bot(37), bot(38)],
+    members: [human(1), human(2), human(3), human(4), bot(37), bot(38)],
     allow: { 37: [2], 38: [3] } as Record<number, number[]>,
+    gate: undefined as Promise<void> | undefined, // when set, PUTs wait for it (a request in flight)
   };
   const calls: Call[] = [];
   const original = globalThis.fetch;
@@ -40,9 +41,10 @@ async function mount(opts: { creator?: number; failPutFor?: number } = {}) {
     if (al) {
       const agent = Number(al[1]);
       if (method === "PUT") {
+        if (server.gate) await server.gate;
         if (agent === opts.failPutFor) return new Response(JSON.stringify({ code: 1, message: "im_unavailable" }), { status: 503 });
         const uids: number[] = body.memberUids;
-        if (uids.some((u) => !server.members.some((m) => m.uid === u))) {
+        if ([agent, ...uids].some((u) => !server.members.some((m) => m.uid === u))) {
           return new Response(JSON.stringify({ code: 1, message: "member_not_found" }), { status: 404 });
         }
         server.allow[agent] = [...uids];
@@ -172,6 +174,141 @@ test("R4: Save sends exactly the drafted list per agent and refreshes the stored
     assert.deepEqual(p?.body, { memberUids: [2, 3] });
     assert.deepEqual(m.s.allowlists.value[37].memberUids, [2, 3]);
     assert.equal(m.s.saving.value, false);
+  } finally { await m.done(); }
+});
+
+// IM-GROUP-F1-FIX-0303: the independent re-review's probes P1-P3/P6 and the X5 gap as
+// product tests. The checkboxes stay live while a Save is in flight, so a tick made then
+// is the owner's newest intent and must not be replaced by the response.
+const hold = (m: { server: { gate?: Promise<void> } }) => {
+  let release!: () => void;
+  m.server.gate = new Promise((r) => (release = r));
+  return () => { release(); m.server.gate = undefined; };
+};
+const tick = () => new Promise((r) => setTimeout(r, 5));
+const putAgents = (calls: Call[]) => puts(calls).map((c) => Number(c.path.match(/agents\/(\d+)/)![1]));
+
+test("F1: a tick on the same agent while its Save is in flight is kept, stays unsaved, and the next Save writes it", async () => {
+  const m = await mount();
+  try {
+    m.s.toggleAllowlist(37, 3);
+    const release = hold(m);
+    const saving = m.s.saveAllowlists();
+    await tick();
+    m.s.toggleAllowlist(37, 4); // owner keeps ticking while the PUT for [2,3] is in flight
+    m.s.toggleAllowlist(38, 2); // and edits another agent too
+    release();
+    await saving;
+    assert.deepEqual(m.server.allow[37], [2, 3], "the in-flight request saved what it carried");
+    assert.deepEqual(m.s.allowlistDrafts.value[37], [2, 3, 4], "in-flight tick lost");
+    assert.deepEqual(m.s.allowlistDrafts.value[38], [3, 2]);
+    assert.deepEqual(m.s.allowlists.value[37].memberUids, [2, 3], "stored list is the server's");
+    const before = m.calls.length;
+    await m.s.saveAllowlists();
+    assert.deepEqual(putAgents(m.calls.slice(before)), [37, 38], "both later edits are still unsaved and are written");
+    assert.deepEqual(m.server.allow[37], [2, 3, 4]);
+    assert.deepEqual(m.server.allow[38], [3, 2]);
+  } finally { await m.done(); }
+});
+
+test("F1b: an in-flight untick back to the old list is kept and saved next (not overwritten by the response)", async () => {
+  const m = await mount();
+  try {
+    m.s.toggleAllowlist(37, 3);
+    const release = hold(m);
+    const saving = m.s.saveAllowlists();
+    await tick();
+    m.s.toggleAllowlist(37, 3); // owner changes their mind mid-flight: back to [2]
+    release();
+    await saving;
+    assert.deepEqual(m.s.allowlistDrafts.value[37], [2]);
+    await m.s.saveAllowlists();
+    assert.deepEqual(m.server.allow[37], [2], "the newest intent wins");
+  } finally { await m.done(); }
+});
+
+test("F1c: an in-flight tick on a departed-member draft keeps the tick; the departed member is still dropped", async () => {
+  const m = await mount();
+  try {
+    m.s.toggleAllowlist(37, 3);
+    m.server.members = m.server.members.filter((x) => x.uid !== 3); // 3 left: the PUT carries [2]
+    const release = hold(m);
+    const saving = m.s.saveAllowlists();
+    await tick();
+    m.s.toggleAllowlist(37, 4);
+    release();
+    await saving;
+    assert.deepEqual(m.server.allow[37], [2]);
+    assert.ok(m.s.allowlistDrafts.value[37].includes(4), "in-flight tick lost");
+    await m.s.saveAllowlists();
+    assert.deepEqual(m.server.allow[37], [2, 4]);
+    assert.equal(m.s.error.value, "");
+  } finally { await m.done(); }
+});
+
+test("F1d: an in-flight tick on an agent whose PUT fails keeps both the tick and the error", async () => {
+  const m = await mount({ failPutFor: 37 });
+  try {
+    m.s.toggleAllowlist(37, 3);
+    const release = hold(m);
+    const saving = m.s.saveAllowlists();
+    await tick();
+    m.s.toggleAllowlist(37, 4);
+    release();
+    await saving;
+    assert.deepEqual(m.s.allowlistDrafts.value[37], [2, 3, 4]);
+    assert.ok(m.s.saveErrors.value[37]);
+  } finally { await m.done(); }
+});
+
+test("P2: Save pressed again while saving sends nothing more", async () => {
+  const m = await mount();
+  try {
+    m.s.toggleAllowlist(37, 3);
+    const release = hold(m);
+    const a = m.s.saveAllowlists();
+    const b = m.s.saveAllowlists();
+    release();
+    await Promise.all([a, b]);
+    assert.deepEqual(putAgents(m.calls), [37]);
+  } finally { await m.done(); }
+});
+
+test("P3: an edited agent that left the group is skipped without a write or an error", async () => {
+  const m = await mount();
+  try {
+    m.s.toggleAllowlist(37, 3);
+    m.s.toggleAllowlist(38, 2);
+    m.server.members = m.server.members.filter((x) => x.uid !== 37);
+    await m.s.saveAllowlists();
+    assert.deepEqual(putAgents(m.calls), [38]);
+    assert.equal(m.s.error.value, "");
+    assert.deepEqual(m.s.saveErrors.value, {});
+  } finally { await m.done(); }
+});
+
+test("P6: a failed agent the owner reverts sends nothing on Save and its error clears", async () => {
+  const m = await mount({ failPutFor: 37 });
+  try {
+    m.s.toggleAllowlist(37, 3);
+    await m.s.saveAllowlists();
+    assert.ok(m.s.saveErrors.value[37]);
+    m.s.toggleAllowlist(37, 3); // revert: nothing left to save
+    const before = m.calls.length;
+    await m.s.saveAllowlists();
+    assert.equal(puts(m.calls.slice(before)).length, 0);
+    assert.deepEqual(m.s.saveErrors.value, {});
+    assert.equal(m.s.error.value, "");
+  } finally { await m.done(); }
+});
+
+test("X5: a failed agent's own error says why (the server's message), on screen", async () => {
+  const m = await mount({ failPutFor: 37 });
+  try {
+    m.s.toggleAllowlist(37, 3);
+    await m.s.saveAllowlists();
+    assert.match(m.s.saveErrors.value[37], /im_unavailable/);
+    assert.match(await m.html(), /data-testid="im-allowlist-error"[^>]*>[^<]*im_unavailable/);
   } finally { await m.done(); }
 });
 
