@@ -390,6 +390,26 @@ test("R9 G2: a member's card opens in the panel's own card area, not as a body l
   assert.match(api, /"onSelect" \| "host"/, "profileParams passes host through");
 });
 
+test("N-G2a: once the card fills the panel's card area, the row that opened it is scrolled back into view", async () => {
+  const prev = (globalThis as any).ResizeObserver;
+  let fire: () => void = () => {};
+  const observed: unknown[] = [];
+  (globalThis as any).ResizeObserver = class { constructor(cb: () => void) { fire = cb; } observe(el: unknown) { observed.push(el); } unobserve() {} disconnect() {} };
+  const m = await mount();
+  try {
+    const host = markRaw({ childElementCount: 0 }) as unknown as HTMLElement;
+    m.s.cardHost.value = host;
+    const scrolled: unknown[] = [];
+    const row = { scrollIntoView: (o: unknown) => scrolled.push(o) } as unknown as HTMLElement;
+    m.s.inspect({ ...human(3) }, row);
+    assert.deepEqual(observed, [host], "watches the card area's size");
+    fire(); // card still loading: area empty
+    assert.deepEqual(scrolled, [], "nothing to keep in view while the area is empty");
+    (host as any).childElementCount = 1; fire(); // the card arrived and took room from the list
+    assert.deepEqual(scrolled, [{ block: "nearest" }]);
+  } finally { (globalThis as any).ResizeObserver = prev; await m.done(); }
+});
+
 test("R10: confirming Add posts the picks, clears them and returns to the member list", async () => {
   const m = await mount();
   try {
