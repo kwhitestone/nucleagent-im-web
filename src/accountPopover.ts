@@ -150,22 +150,28 @@ export function createAccountPopover(url: string, deps: LoaderDeps = realDeps): 
       return undefined;
     }
   }
+  // The latest open or close. An open still loading when a close or a newer open comes
+  // must not mount late: its host may be gone (a closed group panel) or replaced.
+  let latest = 0;
   return {
     degraded,
     async open(el, params) {
+      const mine = ++latest;
       const api = await load();
-      api?.popover.mount(el, params);
+      if (mine === latest) api?.popover.mount(el, params);
       return !!api;
     },
     async openProfile(el, params) {
+      const mine = ++latest;
       const card = (await load())?.profileCard;
-      card?.mount(el, params);
+      if (mine === latest) card?.mount(el, params);
       return !!card;
     },
     async avatar() {
       return (await load())?.avatar;
     },
     close() {
+      latest++;
       // One layer serves both surfaces, so either unmount closes whichever is open.
       loaded?.popover.unmount();
     },
