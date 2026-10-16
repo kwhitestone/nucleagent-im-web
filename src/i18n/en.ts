@@ -113,6 +113,11 @@ export default {
     // A uid with no account at all (never a nickName fallback, never the number).
     noAccount: "No such account",
     view: "View {name}'s profile",
+    // Search/picker rows: visible label, and the accessible name starts with it (WCAG 2.5.3).
+    viewShort: "View profile",
+    viewOf: "View profile: {name}",
+    // account-ui could not load: the card cannot open at all (rows and search stay as they are).
+    unavailable: "Profile can't be opened right now. Try again later.",
   },
   me: {
     myUid: "Your UID",

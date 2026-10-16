@@ -60,7 +60,7 @@ for (const locale of ["zh", "en"] as const) {
     assert.ok(copy.viewShort, "profile.viewShort");
     assert.ok(html.includes(`>${copy.viewShort}<`), "visible text, not an icon-only ⓘ");
     assert.equal(html.match(/data-testid="im-search-info"/g)?.length, 2, "one button per person, not a second one");
-    assert.ok(html.includes(`aria-label="${copy.view.replace("{name}", "林雨")}"`), "label contains the visible text (WCAG 2.5.3)");
+    assert.ok(html.includes(`aria-label="${copy.viewOf.replace("{name}", "林雨")}"`), "label contains the visible text (WCAG 2.5.3)");
     assert.equal(html.match(/data-profile/g)?.length, 4, "avatar + name per row");
     assert.match(html, /UID 15 · 138\*\*\*\*0001/, "same-named accounts still told apart");
 
@@ -133,7 +133,7 @@ test("picker: clicks inside the card (appended to body) do not collapse the open
 test("app: a card that cannot open says so instead of doing nothing", () => {
   const app = readFileSync("src/App.vue", "utf8");
   assert.ok(zh.profile.unavailable && en.profile.unavailable);
-  assert.match(app, /accountUi\.openProfile\(anchor, profileParams\([\s\S]*?\.then\(\(shown\) => \{ if \(!shown && session\.value\) loginError\.value = t\("profile\.unavailable"\)/);
+  assert.match(app, /accountUi\.openProfile\(anchor, profileParams\([\s\S]*?\.then\(\(shown\) => \{ if \(!shown && session\.value === opener\) loginError\.value = t\("profile\.unavailable"\)/);
 });
 
 test("css: the View profile button is a 44px touch target that fits its label", () => {

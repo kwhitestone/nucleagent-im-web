@@ -40,7 +40,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   select: [contact: Contact];
   "update:modelValue": [contacts: Contact[]];
-  /** ⓘ: show this person's profile card; its primary action picks them (board §04). */
+  /** Name / View profile: show this person's profile card; its primary action picks them (board §04). */
   profile: [anchor: HTMLElement, target: ProfileTarget];
   agent: [agent: DirectoryAgent];
 }>();
@@ -195,7 +195,10 @@ function openBrowse(): void {
 }
 
 function closeOnOutside(event: PointerEvent): void {
-  if (root.value && !root.value.contains(event.target as Node)) open.value = false;
+  const target = event.target as Element | null;
+  // The profile card is appended to <body>: using it must not collapse the list it came from.
+  if (target?.closest?.(".acct-pop, .acct-pop-scrim")) return;
+  if (root.value && !root.value.contains(target as Node)) open.value = false;
 }
 if (typeof document !== "undefined") document.addEventListener("pointerdown", closeOnOutside);
 
@@ -245,6 +248,12 @@ async function choose(entry: DirectoryEntry): Promise<void> {
   query.value = "";
   results.value = [];
   if (!props.multiple) open.value = false; // group dialog: keep browsing to add more
+}
+
+// A person's name opens their card (data-profile); the rest of the row picks them.
+function onPick(entry: DirectoryEntry, event: MouseEvent): Promise<void> | void {
+  if ((event.target as Element | null)?.closest?.("[data-profile]")) return inspect(entry, event.currentTarget as HTMLElement);
+  return choose(entry);
 }
 
 function inspect(entry: DirectoryEntry, anchor: HTMLElement): void {
@@ -315,9 +324,9 @@ onBeforeUnmount(() => {
     <!-- Browse mode: everyone, by name. Same rows and badges as search. -->
     <div v-if="browsing" class="contact-results" role="listbox" data-testid="im-directory-browse">
       <div v-for="contact in browseShown" :key="entryKey(contact)" class="contact-row">
-        <button class="contact-result" type="button" role="option" @click="choose(contact)">
+        <button class="contact-result" type="button" role="option" @click="onPick(contact, $event)">
           <span>
-            <strong>{{ rowName(contact) }}</strong>
+            <strong data-profile class="profile-target">{{ rowName(contact) }}</strong>
             <small v-if="contact.provisioned">{{ rowSub(contact) }}</small>
             <small v-else>{{ portalSub(contact) }}</small>
           </span>
@@ -329,11 +338,9 @@ onBeforeUnmount(() => {
           class="contact-info"
           type="button"
           data-testid="im-picker-info"
-          :aria-label="t('profile.view', { name: rowName(contact) })"
+          :aria-label="t('profile.viewOf', { name: rowName(contact) })"
           @click="inspect(contact, $event.currentTarget as HTMLElement)"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
-        </button>
+        >{{ t('profile.viewShort') }}</button>
       </div>
       <p v-if="error" class="picker-status error" role="alert">{{ error }}</p>
       <p v-if="browseLoading" class="picker-status">{{ t("chat.loading") }}</p>
@@ -348,9 +355,9 @@ onBeforeUnmount(() => {
     <p v-else-if="error" class="picker-status error" role="alert">{{ error }}</p>
     <div v-else-if="peopleResults.length" class="contact-results" role="listbox">
       <div v-for="contact in peopleResults" :key="entryKey(contact)" class="contact-row">
-        <button class="contact-result" type="button" role="option" @click="choose(contact)">
+        <button class="contact-result" type="button" role="option" @click="onPick(contact, $event)">
           <span>
-            <strong>{{ rowName(contact) }}</strong>
+            <strong data-profile class="profile-target">{{ rowName(contact) }}</strong>
             <!-- UID stays as secondary text: the only way to tell duplicate names
                  apart, and it quietly teaches that a UID is shareable. -->
             <small v-if="contact.provisioned">{{ rowSub(contact) }}</small>
@@ -364,11 +371,9 @@ onBeforeUnmount(() => {
           class="contact-info"
           type="button"
           data-testid="im-picker-info"
-          :aria-label="t('profile.view', { name: rowName(contact) })"
+          :aria-label="t('profile.viewOf', { name: rowName(contact) })"
           @click="inspect(contact, $event.currentTarget as HTMLElement)"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
-        </button>
+        >{{ t('profile.viewShort') }}</button>
       </div>
       <p v-if="rateLimited" class="picker-status error" role="status" data-testid="im-picker-rate-limited">{{ t("search.rateLimited") }}</p>
       <button v-if="hasMore" class="quiet contact-more" type="button" @click="more">{{ t("search.more") }}</button>

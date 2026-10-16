@@ -1919,32 +1919,33 @@ kbd {
   border-bottom: 0;
 }
 
+/* "View profile": visible text, still a 44px touch target. */
 .contact-info {
   display: grid;
   flex: none;
-  width: 44px;
+  min-width: 44px;
   height: 44px;
-  padding: 0;
+  padding: 0 10px;
   place-items: center;
   border: 0;
   border-radius: var(--r-sm);
-  color: var(--text-tertiary);
+  color: var(--accent);
   background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
+}
+
+/* Avatar / name in a search or picker row open the card; the rest of the row acts. */
+.search-row strong.profile-target:hover,
+.contact-result .profile-target:hover {
+  text-decoration: underline;
 }
 
 .contact-info:hover {
   color: var(--text-primary);
   background: var(--bg-hover);
-}
-
-.contact-info svg {
-  width: 16px;
-  height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
 }
 
 /* ---------- IM3-D4: hide / multi-select ---------- */

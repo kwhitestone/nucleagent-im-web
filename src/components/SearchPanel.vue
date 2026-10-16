@@ -43,7 +43,7 @@ const emit = defineEmits<{
   contact: [entry: DirectoryEntry];
   agent: [agent: DirectoryAgent];
   message: [hit: MessageHit];
-  /** Contact ⓘ: that person's card, whose primary action opens the chat (same as the old picker). */
+  /** Contact avatar/name/View profile: that person's card, whose primary action opens the chat (same as the old picker). */
   profile: [anchor: HTMLElement, target: ProfileTarget];
 }>();
 const { t } = useI18n();
@@ -180,6 +180,14 @@ function pick(row: Row): void {
   else if (row.kind === "contact") emit("contact", row.entry);
   else if (row.kind === "agent") emit("agent", row.agent);
   else emit("message", row.hit);
+}
+
+// A person's avatar or name opens their card (data-profile); the rest of the row
+// keeps its own action. Handled at the row so no button nests in a button.
+function onRowClick(row: Row, event: MouseEvent): void {
+  if (row.kind === "contact" && (event.target as Element | null)?.closest?.("[data-profile]")) {
+    inspect(row.entry, row.title, event.currentTarget as HTMLElement);
+  } else pick(row);
 }
 
 function inspect(entry: DirectoryEntry, title: string, anchor: HTMLElement): void {
@@ -330,7 +338,7 @@ defineExpose({ focus: () => input.value?.focus() });
             :aria-selected="rowIndex(row) === active"
             :data-testid="`im-search-row-${row.kind}`"
             @mouseenter="active = rowIndex(row)"
-            @click="pick(row)"
+            @click="onRowClick(row, $event)"
           >
             <template v-if="row.kind === 'conversation'">
               <RowAvatar :id="row.conversation.channel.channelID" :name="row.title" :kind="avatarKind(row.conversation)" />
@@ -341,9 +349,9 @@ defineExpose({ focus: () => input.value?.focus() });
               <span v-if="hiddenKeys.has(keyOf(row.conversation))" class="account-badge hidden-tag">{{ t("hide.tag") }}</span>
             </template>
             <template v-else-if="row.kind === 'contact'">
-              <RowAvatar :id="String(row.entry.id)" :name="row.title" kind="person" />
+              <RowAvatar :id="String(row.entry.id)" :name="row.title" kind="person" data-profile />
               <span class="search-copy">
-                <strong><template v-for="(segment, i) in markSegments(row.title, titleMatch(row.title, query) || [])" :key="i"><mark v-if="segment.hit">{{ segment.text }}</mark><template v-else>{{ segment.text }}</template></template></strong>
+                <strong data-profile class="profile-target"><template v-for="(segment, i) in markSegments(row.title, titleMatch(row.title, query) || [])" :key="i"><mark v-if="segment.hit">{{ segment.text }}</mark><template v-else>{{ segment.text }}</template></template></strong>
                 <small>{{ directorySub(row.entry, t) }}</small>
               </span>
               <span v-if="hiddenKeys.has(`${ChannelTypePerson}:${row.entry.id}`)" class="account-badge hidden-tag">{{ t("hide.tag") }}</span>
@@ -377,11 +385,9 @@ defineExpose({ focus: () => input.value?.focus() });
             class="contact-info"
             type="button"
             data-testid="im-search-info"
-            :aria-label="t('profile.view', { name: row.title })"
+            :aria-label="t('profile.viewOf', { name: row.title })"
             @click="inspect(row.entry, row.title, $event.currentTarget as HTMLElement)"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
-          </button>
+          >{{ t('profile.viewShort') }}</button>
           </div>
         </section>
 
