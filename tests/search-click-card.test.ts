@@ -152,3 +152,9 @@ test("card actions from search: others get Send message (legacy portal-only too)
   assert.deepEqual(profileActions({ uid: "11", message }, self), { select: false, message: false, addToGroup: false }, "own row");
   assert.deepEqual(profileActions({ uid: "" }, self), { select: false, message: false, addToGroup: false }, "no address, no caller open");
 });
+
+test("template: a row click hands the clicked row to pick() as the card's anchor (without it no card opens)", () => {
+  const panel = readFileSync("src/components/SearchPanel.vue", "utf8");
+  const row = panel.slice(panel.indexOf('class="search-row"'), panel.indexOf(">", panel.indexOf('@click="pick(')));
+  assert.match(row, /@click="pick\(row, \$event\.currentTarget as HTMLElement\)"/);
+});
