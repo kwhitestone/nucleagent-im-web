@@ -1349,6 +1349,11 @@ function showCreateGroup(preselect: Contact[] = []): void {
 // (UNI-AVATAR-CARD-R2). Actions follow the context (board
 // §03): no "Message" inside that very DM; the picker's primary is "Select".
 const accountUi = useAccountPopover();
+// Cancel before another surface can open a card in the same event.
+watch(searchOpen, (open) => {
+  if (!open) accountUi.close();
+}, { flush: "sync" });
+
 function openProfile(anchor: HTMLElement, target: ProfileTarget): void {
   if (!session.value || !(target.uid || target.openId || target.portalUid)) return;
   const uid = target.uid;

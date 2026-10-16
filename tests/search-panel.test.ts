@@ -153,14 +153,15 @@ test("U2 idle: recent searches with a clear button; placeholder no longer promis
   }
 });
 
-test("U1: tabs all / conversations / contacts / agents / messages / files with counts, Tab cycles them", () => {
+test("U1: category controls keep counts and input keyboard navigation leaves Tab native", () => {
   for (const tab of ["all", "conversations", "contacts", "agents", "messages", "files"]) {
     assert.match(panelSource, new RegExp(`"${tab}"`));
     assert.ok((zh.search.tabs as Record<string, string>)[tab] && (en.search.tabs as Record<string, string>)[tab], tab);
   }
   assert.match(panelSource, /role="tablist"/);
   assert.match(panelSource, /aria-selected/);
-  assert.match(panelSource, /event\.key === "Tab"[\s\S]*?event\.preventDefault\(\)/);
+  assert.doesNotMatch(panelSource, /event\.key === "Tab"/);
+  assert.match(panelSource, /@click="tab = name"/);
   assert.match(panelSource, /event\.key === "ArrowDown"[\s\S]*?event\.key === "ArrowUp"[\s\S]*?event\.key === "Enter"[\s\S]*?event\.key === "Escape"/);
 });
 

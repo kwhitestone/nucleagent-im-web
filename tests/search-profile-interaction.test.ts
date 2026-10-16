@@ -49,6 +49,21 @@ const lin = { id: 14, portalUid: 3, username: "lin.yu", displayName: "林雨", a
 const linSms = { id: 15, portalUid: 103, username: "", displayName: "林雨", accountType: "human", provisioned: true, phoneMasked: "138****0001", openId: "nduc_sms_15" };
 const panelProps = { session, conversations: [], hiddenKeys: new Set(), agents: [], titleFor: () => "" };
 
+test("search keyboard: Tab and Shift+Tab keep native focus traversal and category", async () => {
+  const { bindings } = await mount("src/components/SearchPanel.vue", panelProps, () => {});
+  for (const shiftKey of [false, true]) {
+    let prevented = false;
+    bindings.onKeydown({ key: "Tab", shiftKey, preventDefault: () => { prevented = true; } });
+    assert.equal(prevented, false);
+    assert.equal(bindings.tab.value, "all");
+  }
+});
+
+test("search exit: every false transition closes the shared card synchronously", () => {
+  const app = readFileSync("src/App.vue", "utf8");
+  assert.match(app, /watch\(searchOpen, \(open\) => \{\s*if \(!open\) accountUi\.close\(\);\s*\}, \{ flush: "sync" \}\)/);
+});
+
 for (const locale of ["zh", "en"] as const) {
   test(`${locale}: search page contact row — avatar and name are card targets, a visible "View profile" button, the row still messages`, async () => {
     const { html, bindings, emitted } = await mount("src/components/SearchPanel.vue", panelProps, (b) => {

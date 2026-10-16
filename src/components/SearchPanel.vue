@@ -211,11 +211,7 @@ function clearRecent(): void {
 }
 
 function onKeydown(event: KeyboardEvent): void {
-  if (event.key === "Tab") {
-    event.preventDefault();
-    const at = tabs.indexOf(tab.value) + (event.shiftKey ? -1 : 1);
-    tab.value = tabs[(at + tabs.length) % tabs.length];
-  } else if (event.key === "ArrowDown") {
+  if (event.key === "ArrowDown") {
     event.preventDefault();
     active.value = Math.min(active.value + 1, Math.max(flat.value.length - 1, 0));
     scrollActive();
