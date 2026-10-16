@@ -140,6 +140,7 @@ export default {
     you: "你",
     errHistory: "消息历史加载失败",
     targetUnavailable: "无法打开这个 IM 会话：它可能已解散，或你不是成员。",
+    selfChat: "这是你自己，不能和自己聊天。",
     errConversations: "会话列表同步失败",
     errGroups: "群列表加载失败",
   },
