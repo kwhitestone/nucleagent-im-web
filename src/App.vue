@@ -1358,6 +1358,7 @@ function openProfile(anchor: HTMLElement, target: ProfileTarget): void {
   const can = profileActions(target, {
     selfUid: session.value.uid,
     dmUid: channel?.channelType === ChannelTypePerson ? channel.channelID : undefined,
+    inGroup: groupDialogOpen.value && !!dialogGroup.value,
   });
   const contact = (): Contact => ({
     id: Number(uid), username: target.known?.username ?? "",
@@ -1376,7 +1377,7 @@ function openProfile(anchor: HTMLElement, target: ProfileTarget): void {
   };
   const opener = session.value;
   void accountUi.openProfile(anchor, profileParams(session.value, getLocale(), {
-    openId, uid, portalUid: openId ? undefined : target.portalUid, known: target.known,
+    openId, uid, portalUid: openId ? undefined : target.portalUid, known: target.known, host: target.host,
     onSelect: can.select ? target.select : undefined,
     onMessage: can.message ? () => void message() : undefined,
     onAddToGroup: !can.addToGroup ? undefined : () => {
