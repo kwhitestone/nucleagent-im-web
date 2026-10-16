@@ -113,6 +113,8 @@ export default {
     // A uid with no account at all (never a nickName fallback, never the number).
     noAccount: "No such account",
     view: "View {name}'s profile",
+    // account-ui could not load: the card cannot open at all (rows and search stay as they are).
+    unavailable: "Profile can't be opened right now. Try again later.",
   },
   me: {
     myUid: "Your UID",

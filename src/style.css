@@ -2278,10 +2278,6 @@ kbd {
   align-items: center;
 }
 
-.search-row-wrap .contact-info {
-  margin-right: 8px;
-}
-
 .search-row.active,
 .search-row:hover {
   background: var(--bg-hover);
