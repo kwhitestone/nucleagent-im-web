@@ -188,7 +188,12 @@ test("normal open and switch are kept: each awaited open mounts, and close unmou
   assert.equal(await ui.openProfile(anchor, card("11", "host")), true);
   assert.equal(await ui.open(anchor, { user: { nickName: "me", headerImg: "", uid: "1" }, locale: "zh", logout() {}, manageAccount() {} }), true);
   ui.close();
-  assert.deepEqual(shell.log, ["card:3", "card:11", "popover", "unmount"]);
+  // The rail chip's avatar() (IdentityCard watcher) is no open: it does not cancel one in flight.
+  const pending = ui.openProfile(anchor, card("5", "host"));
+  await ui.avatar();
+  assert.equal(await pending, true);
+  ui.close();
+  assert.deepEqual(shell.log, ["card:3", "card:11", "popover", "unmount", "card:5", "unmount"]);
   assert.equal(shell.layer, null);
 });
 
