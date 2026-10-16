@@ -210,3 +210,46 @@ test("rail Me: the chip avatar is the shell's one avatar control, resolved as th
   assert.doesNotMatch(card, /<img\b/, "no private avatar rendering");
   assert.match(app, /<IdentityCard[\s\S]*?:token="session\.jwt"/);
 });
+
+// IM-WEB-FOLLOWUPS-1920: the rail Me card hands the shell popover the same
+// auth the avatar uses, so a not-yet-resolved (or failed) Open ID is fetched by
+// the shell's own resolve + Retry instead of sitting at "…". Behavioural: the
+// real component's click, with the shared popover's open() captured.
+async function clickRailMe(props: Record<string, unknown>) {
+  const { useAccountPopover } = await import("../src/accountPopover.ts");
+  const { authBase } = await import("../src/api.ts");
+  const ui = useAccountPopover();
+  const seen: Array<Record<string, any>> = [];
+  const saved = { open: ui.open, avatar: ui.avatar };
+  ui.open = async (_el, p) => { seen.push(p as never); return true; };
+  ui.avatar = async () => undefined;
+  const IdentityCard = await loadComponent("src/components/IdentityCard.vue") as { setup: (...a: unknown[]) => any };
+  const setup = IdentityCard.setup;
+  let bindings: any;
+  IdentityCard.setup = function (this: unknown, p: unknown, c: unknown) { return (bindings = setup.call(this, p, c)); };
+  try {
+    await render(IdentityCard, props, "en");
+    bindings.chip.value = {};
+    await bindings.onClick();
+  } finally {
+    Object.assign(ui, saved);
+    IdentityCard.setup = setup;
+  }
+  return { seen, authBase };
+}
+
+test("rail Me: the popover gets this session's auth, so the shell resolves an unknown Open ID itself", async () => {
+  const { resetNames } = await import("../src/names.ts");
+  resetNames(); // the batch resolve has not landed (or failed): openId unknown
+  const { seen, authBase } = await clickRailMe({ uid: "10480118", displayName: "Chen Mo", token: "session-jwt-1920" });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].user.openId, undefined, "unknown stays unknown: the shell decides to resolve");
+  assert.deepEqual(seen[0].auth, { base: authBase, token: "session-jwt-1920" });
+  assert.match(app, /<IdentityCard[\s\S]*?:token="session\.jwt"/, "the token is the IM session's own access token");
+});
+
+test("rail Me: no token, no auth (the popover keeps the row as given)", async () => {
+  const { seen } = await clickRailMe({ uid: "10480118", displayName: "Chen Mo" });
+  assert.equal(seen.length, 1);
+  assert.equal("auth" in seen[0] && seen[0].auth !== undefined, false);
+});
