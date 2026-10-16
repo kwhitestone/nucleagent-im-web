@@ -43,7 +43,7 @@ const emit = defineEmits<{
   contact: [entry: DirectoryEntry];
   agent: [agent: DirectoryAgent];
   message: [hit: MessageHit];
-  /** Contact ⓘ: that person's card, whose primary action opens the chat (same as the old picker). */
+  /** A person's row: their card; only its "Send message" opens the chat (IM-SEARCH-CLICK-CARD-1620). */
   profile: [anchor: HTMLElement, target: ProfileTarget];
 }>();
 const { t } = useI18n();
@@ -171,24 +171,28 @@ function retry(): void {
   void search();
 }
 
-function pick(row: Row): void {
+function pick(row: Row, anchor?: HTMLElement): void {
   if (query.value.trim()) {
     rememberSearch(props.session.uid, query.value);
     recent.value = loadRecentSearches(props.session.uid);
   }
   if (row.kind === "conversation") emit("conversation", row.conversation);
-  else if (row.kind === "contact") emit("contact", row.entry);
+  else if (row.kind === "contact") inspect(row.entry, row.title, anchor);
   else if (row.kind === "agent") emit("agent", row.agent);
   else emit("message", row.hit);
 }
 
-function inspect(entry: DirectoryEntry, title: string, anchor: HTMLElement): void {
+function inspect(entry: DirectoryEntry, title: string, anchor?: HTMLElement): void {
+  if (!anchor) return;
+  // F1: after input ArrowDown+Enter focus is still in the search field, where the card's Esc
+  // (stopPropagation only) lets the browser's native Esc clear the query. The row takes it first.
+  anchor.focus();
   emit("profile", anchor, {
     uid: entry.provisioned ? String(entry.id) : "",
     openId: entry.openId || undefined,
     portalUid: entry.provisioned || entry.openId ? undefined : entry.portalUid,
     known: { nickName: title, username: entry.username, avatar: entry.avatar, accountType: entry.accountType, provisioned: entry.provisioned },
-    select: () => emit("contact", entry),
+    message: () => emit("contact", entry),
   });
 }
 
@@ -203,11 +207,8 @@ function clearRecent(): void {
 }
 
 function onKeydown(event: KeyboardEvent): void {
-  if (event.key === "Tab") {
-    event.preventDefault();
-    const at = tabs.indexOf(tab.value) + (event.shiftKey ? -1 : 1);
-    tab.value = tabs[(at + tabs.length) % tabs.length];
-  } else if (event.key === "ArrowDown") {
+  // Tab stays native so focus reaches the result rows (categories are buttons).
+  if (event.key === "ArrowDown") {
     event.preventDefault();
     active.value = Math.min(active.value + 1, Math.max(flat.value.length - 1, 0));
     scrollActive();
@@ -219,7 +220,7 @@ function onKeydown(event: KeyboardEvent): void {
     const row = flat.value[active.value];
     if (row) {
       event.preventDefault();
-      pick(row);
+      pick(row, document.querySelector<HTMLElement>(".search-panel .search-row.active") ?? undefined);
     }
   } else if (event.key === "Escape") {
     event.preventDefault();
@@ -329,8 +330,9 @@ defineExpose({ focus: () => input.value?.focus() });
             :class="{ active: rowIndex(row) === active }"
             :aria-selected="rowIndex(row) === active"
             :data-testid="`im-search-row-${row.kind}`"
+            :aria-haspopup="row.kind === 'contact' ? 'dialog' : undefined"
             @mouseenter="active = rowIndex(row)"
-            @click="pick(row)"
+            @click="pick(row, $event.currentTarget as HTMLElement)"
           >
             <template v-if="row.kind === 'conversation'">
               <RowAvatar :id="row.conversation.channel.channelID" :name="row.title" :kind="avatarKind(row.conversation)" />
@@ -371,16 +373,6 @@ defineExpose({ focus: () => input.value?.focus() });
                 <span v-if="row.hit.hidden" class="account-badge hidden-tag">{{ t("hide.tag") }}</span>
               </span>
             </template>
-          </button>
-          <button
-            v-if="row.kind === 'contact'"
-            class="contact-info"
-            type="button"
-            data-testid="im-search-info"
-            :aria-label="t('profile.view', { name: row.title })"
-            @click="inspect(row.entry, row.title, $event.currentTarget as HTMLElement)"
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
           </button>
           </div>
         </section>

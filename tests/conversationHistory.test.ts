@@ -31,7 +31,7 @@ function harness() {
     messages: { value: [] }, draft: { value: "" }, mentionedAgentUids: { value: [] }, mentionedPersonUids: { value: [] },
     historyFinished: { value: false }, loadingHistory: { value: false },
     loginError: { value: "" }, loggingIn: { value: false }, groups: { value: [] },
-    viewGeneration: 0, ChannelTypeGroup: 2,
+    viewGeneration: 0, ChannelTypeGroup: 2, ChannelTypePerson: 1,
     t: (key: string) => key,
     memberGroups: [{ wukongChannelId: "group-4" }] as Array<{ wukongChannelId: string }> | Error,
     listGroups: async () => {
@@ -157,4 +157,24 @@ test("signout invalidates a pending login and its conversation target", async ()
   await flush();
   assert.equal(h.state.session.value, undefined);
   assert.deepEqual(h.requests, []);
+});
+
+// SELFDM-403: search row / card / dial on your own uid used to open uid@uid, which im answers 403.
+test("opening a DM with yourself sends nothing and says why; another person still opens", async () => {
+  const h = harness();
+  let streams = 0, reads = 0;
+  h.state.startAgentStream = () => { streams++; };
+  h.state.markChannelRead = () => { reads++; };
+  h.state.session.value = { uid: "11" };
+  await runInContext("openChannel(new Channel('11', ChannelTypePerson))", h.state);
+  assert.deepEqual(h.requests, []);
+  assert.equal(streams + reads, 0);
+  assert.equal(h.state.activeChannel.value, undefined);
+  assert.equal(h.state.loginError.value, "chat.selfChat");
+
+  h.state.loginError.value = "";
+  await runInContext("openChannel(new Channel('13', ChannelTypePerson))", h.state);
+  assert.deepEqual(h.requests, [{ channelID: "13", channelType: 1 }]);
+  assert.equal(streams + reads, 2);
+  assert.equal(h.state.loginError.value, "");
 });

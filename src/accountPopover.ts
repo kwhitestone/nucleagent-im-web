@@ -21,6 +21,8 @@ export interface AccountPopoverParams {
   manageAccount: () => void;
   locale: "zh" | "en";
   theme?: "light" | "dark";
+  /** OPENID-BLANK-1620: where and as whom the shell resolves your own unknown Open ID; omitted: row as given. */
+  auth?: { base: string; token: string };
 }
 
 export interface AccountPopoverMount {
@@ -41,6 +43,8 @@ export interface ProfileCardParams {
   onMessage?: () => void;
   onAddToGroup?: () => void;
   onSelect?: () => void;
+  /** Render in place inside this element instead of a body layer (shell contract; older shells ignore it). */
+  host?: HTMLElement;
 }
 
 export interface ProfileCardMount {
@@ -71,6 +75,10 @@ export interface ProfileTarget {
   known?: ProfileCardParams["known"];
   /** Picker ⓘ: the card's primary action picks this person. */
   select?: () => void;
+  /** The group panel's card area: the card renders there, not over the member list (G2). */
+  host?: HTMLElement;
+  /** Search page: the card's "Send message" runs the caller's own open (provision, close search). */
+  message?: () => void;
 }
 
 export interface LoaderDeps {
@@ -146,22 +154,28 @@ export function createAccountPopover(url: string, deps: LoaderDeps = realDeps): 
       return undefined;
     }
   }
+  // The latest open or close. An open still loading when a close or a newer open comes
+  // must not mount late: its host may be gone (a closed group panel) or replaced.
+  let latest = 0;
   return {
     degraded,
     async open(el, params) {
+      const mine = ++latest;
       const api = await load();
-      api?.popover.mount(el, params);
+      if (mine === latest) api?.popover.mount(el, params);
       return !!api;
     },
     async openProfile(el, params) {
+      const mine = ++latest;
       const card = (await load())?.profileCard;
-      card?.mount(el, params);
+      if (mine === latest) card?.mount(el, params);
       return !!card;
     },
     async avatar() {
       return (await load())?.avatar;
     },
     close() {
+      latest++;
       // One layer serves both surfaces, so either unmount closes whichever is open.
       loaded?.popover.unmount();
     },
@@ -180,7 +194,7 @@ export function useAccountPopover(): AccountPopover {
 export function profileParams(
   session: ConnectSession,
   locale: "zh" | "en",
-  target: Pick<ProfileCardParams, "openId" | "uid" | "portalUid" | "known" | "onMessage" | "onAddToGroup" | "onSelect">,
+  target: Pick<ProfileCardParams, "openId" | "uid" | "portalUid" | "known" | "onMessage" | "onAddToGroup" | "onSelect" | "host">,
 ): ProfileCardParams {
   return { ...target, auth: { base: authBase, token: session.jwt }, locale };
 }
@@ -192,15 +206,17 @@ export function profileParams(
  * messaged (provisioned on click); one with neither uid nor openId cannot.
  */
 export function profileActions(
-  target: Pick<ProfileTarget, "uid" | "openId" | "select">,
-  context: { selfUid: string; dmUid?: string },
+  target: Pick<ProfileTarget, "uid" | "openId" | "select" | "message">,
+  /** inGroup: opened from the group panel, where "Add to group" would drop that panel (G3). */
+  context: { selfUid: string; dmUid?: string; inGroup?: boolean },
 ): { select: boolean; message: boolean; addToGroup: boolean } {
   if (target.select) return { select: true, message: false, addToGroup: false };
   // An openId-only target is never self: the signed-in user always has a uid row.
-  const other = target.uid ? target.uid !== context.selfUid : !!target.openId;
+  // A legacy portal-only search hit (no uid, no openId) is messaged through the search's own provisioning.
+  const other = target.uid ? target.uid !== context.selfUid : !!(target.openId || target.message);
   return {
     select: false,
     message: other && !(target.uid && target.uid === context.dmUid),
-    addToGroup: other && !!target.uid,
+    addToGroup: other && !!target.uid && !context.inGroup,
   };
 }

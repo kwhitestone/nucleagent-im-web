@@ -113,6 +113,8 @@ export default {
     // A uid with no account at all (never a nickName fallback, never the number).
     noAccount: "No such account",
     view: "View {name}'s profile",
+    // account-ui could not load: the card cannot open at all (rows and search stay as they are).
+    unavailable: "Profile can't be opened right now. Try again later.",
   },
   me: {
     myUid: "Your UID",
@@ -140,6 +142,7 @@ export default {
     you: "You",
     errHistory: "Message history failed",
     targetUnavailable: "Can't open this IM chat: it may have been removed, or you're not a member.",
+    selfChat: "That's you — you can't chat with yourself.",
     errConversations: "Conversation sync failed",
     errGroups: "Groups could not be loaded",
   },
@@ -175,6 +178,7 @@ export default {
     searchMembers: "Search contacts",
     owner: "Owner",
     remove: "Remove",
+    removeConfirm: "Confirm remove",
     leave: "Leave group",
     delete: "Delete group",
     allowlistTitle: "Who can call {agent}",
@@ -188,6 +192,7 @@ export default {
     errMembers: "Group members could not be loaded",
     errCreate: "Group could not be created",
     errSave: "Save failed",
+    errSaveAgents: "Not saved for: {agents}. The others were saved; press Save again to retry.",
   },
   hide: {
     listMenu: "More",

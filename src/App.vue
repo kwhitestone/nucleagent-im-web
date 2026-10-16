@@ -1163,6 +1163,11 @@ function locate(seq: number): void {
 }
 
 async function openChannel(channel: Channel, around?: number): Promise<void> {
+  // There is no chat with yourself: im refuses the uid@uid pair (403), so say why instead.
+  if (channel.channelType === ChannelTypePerson && channel.channelID === String(session.value?.uid ?? "")) {
+    loginError.value = t("chat.selfChat");
+    return;
+  }
   viewGeneration += 1;
   const generation = viewGeneration;
   activeChannel.value = channel;
@@ -1350,7 +1355,14 @@ function showCreateGroup(preselect: Contact[] = []): void {
 // §03): no "Message" inside that very DM; the picker's primary is "Select".
 const accountUi = useAccountPopover();
 function openProfile(anchor: HTMLElement, target: ProfileTarget): void {
-  if (!session.value || !(target.uid || target.openId || target.portalUid)) return;
+  if (!session.value) return;
+  // uid 0 is nobody's (a not-yet-joined directory row): address by openId/portalUid instead.
+  if (target.uid === "0") target = { ...target, uid: "" };
+  // Nothing to address the card by: say so, never a click that does nothing.
+  if (!(target.uid || target.openId || target.portalUid)) {
+    loginError.value = t("profile.unavailable");
+    return;
+  }
   const uid = target.uid;
   // UNI-OID: IM rows know a uid; pass the Open ID too when resolve already named it (D2: none for agents).
   const openId = target.openId || (uid ? openIdOf(uid) || undefined : undefined);
@@ -1358,6 +1370,7 @@ function openProfile(anchor: HTMLElement, target: ProfileTarget): void {
   const can = profileActions(target, {
     selfUid: session.value.uid,
     dmUid: channel?.channelType === ChannelTypePerson ? channel.channelID : undefined,
+    inGroup: groupDialogOpen.value && !!dialogGroup.value,
   });
   const contact = (): Contact => ({
     id: Number(uid), username: target.known?.username ?? "",
@@ -1374,15 +1387,17 @@ function openProfile(anchor: HTMLElement, target: ProfileTarget): void {
       if (session.value === messageSession) loginError.value = error instanceof Error ? error.message : t("uid.notFound");
     }
   };
+  const opener = session.value;
   void accountUi.openProfile(anchor, profileParams(session.value, getLocale(), {
-    openId, uid, portalUid: openId ? undefined : target.portalUid, known: target.known,
+    openId, uid, portalUid: openId ? undefined : target.portalUid, known: target.known, host: target.host,
     onSelect: can.select ? target.select : undefined,
-    onMessage: can.message ? () => void message() : undefined,
+    onMessage: can.message ? () => void (target.message ?? message)() : undefined,
     onAddToGroup: !can.addToGroup ? undefined : () => {
       groupDialogOpen.value = false;
       void nextTick(() => showCreateGroup([contact()]));
     },
-  }));
+  // account-ui could not load: say so rather than a click that does nothing.
+  })).then((shown) => { if (!shown && session.value === opener) loginError.value = t("profile.unavailable"); });
 }
 
 function senderProfile(message: Message, event: MouseEvent): void {

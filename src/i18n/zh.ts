@@ -113,6 +113,8 @@ export default {
     // A uid with no account at all (never a nickName fallback, never the number).
     noAccount: "无此账号",
     view: "查看 {name} 的资料",
+    // account-ui could not load: the card cannot open at all (rows and search stay as they are).
+    unavailable: "资料卡暂时无法打开，请稍后重试",
   },
   me: {
     myUid: "我的 UID",
@@ -140,6 +142,7 @@ export default {
     you: "你",
     errHistory: "消息历史加载失败",
     targetUnavailable: "无法打开这个 IM 会话：它可能已解散，或你不是成员。",
+    selfChat: "这是你自己，不能和自己聊天。",
     errConversations: "会话列表同步失败",
     errGroups: "群列表加载失败",
   },
@@ -175,6 +178,7 @@ export default {
     searchMembers: "搜索联系人",
     owner: "群主",
     remove: "移除",
+    removeConfirm: "确认移除",
     leave: "退出群聊",
     delete: "解散群聊",
     allowlistTitle: "谁可以呼叫 {agent}",
@@ -188,6 +192,7 @@ export default {
     errMembers: "群成员加载失败",
     errCreate: "群聊创建失败",
     errSave: "保存失败",
+    errSaveAgents: "以下智能体的呼叫名单未保存：{agents}。其余已保存，可再次点击保存重试。",
   },
   hide: {
     listMenu: "更多",
