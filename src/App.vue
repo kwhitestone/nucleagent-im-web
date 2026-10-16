@@ -1163,6 +1163,11 @@ function locate(seq: number): void {
 }
 
 async function openChannel(channel: Channel, around?: number): Promise<void> {
+  // There is no chat with yourself: im refuses the uid@uid pair (403), so say why instead.
+  if (channel.channelType === ChannelTypePerson && channel.channelID === String(session.value?.uid ?? "")) {
+    loginError.value = t("chat.selfChat");
+    return;
+  }
   viewGeneration += 1;
   const generation = viewGeneration;
   activeChannel.value = channel;

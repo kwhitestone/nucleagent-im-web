@@ -140,6 +140,7 @@ export default {
     you: "You",
     errHistory: "Message history failed",
     targetUnavailable: "Can't open this IM chat: it may have been removed, or you're not a member.",
+    selfChat: "That's you — you can't chat with yourself.",
     errConversations: "Conversation sync failed",
     errGroups: "Groups could not be loaded",
   },
