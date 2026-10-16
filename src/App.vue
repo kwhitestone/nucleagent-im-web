@@ -1350,7 +1350,14 @@ function showCreateGroup(preselect: Contact[] = []): void {
 // §03): no "Message" inside that very DM; the picker's primary is "Select".
 const accountUi = useAccountPopover();
 function openProfile(anchor: HTMLElement, target: ProfileTarget): void {
-  if (!session.value || !(target.uid || target.openId || target.portalUid)) return;
+  if (!session.value) return;
+  // uid 0 is nobody's (a not-yet-joined directory row): address by openId/portalUid instead.
+  if (target.uid === "0") target = { ...target, uid: "" };
+  // Nothing to address the card by: say so, never a click that does nothing.
+  if (!(target.uid || target.openId || target.portalUid)) {
+    loginError.value = t("profile.unavailable");
+    return;
+  }
   const uid = target.uid;
   // UNI-OID: IM rows know a uid; pass the Open ID too when resolve already named it (D2: none for agents).
   const openId = target.openId || (uid ? openIdOf(uid) || undefined : undefined);

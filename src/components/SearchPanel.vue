@@ -184,6 +184,9 @@ function pick(row: Row, anchor?: HTMLElement): void {
 
 function inspect(entry: DirectoryEntry, title: string, anchor?: HTMLElement): void {
   if (!anchor) return;
+  // F1: after input ArrowDown+Enter focus is still in the search field, where the card's Esc
+  // (stopPropagation only) lets the browser's native Esc clear the query. The row takes it first.
+  anchor.focus();
   emit("profile", anchor, {
     uid: entry.provisioned ? String(entry.id) : "",
     openId: entry.openId || undefined,
