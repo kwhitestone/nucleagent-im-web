@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { Channel, ChannelTypePerson, Conversation } from "wukongimjssdk";
 import { loadComponent, render } from "./render.ts";
+import { profileActions } from "../src/accountPopover.ts";
 import zh from "../src/i18n/zh.ts";
 import en from "../src/i18n/en.ts";
 
@@ -140,4 +141,14 @@ test("App: the card's Send message from search runs the search's own open (provi
   assert.match(app, /onMessage: can\.message \? \(\) => void \(target\.message \?\? message\)\(\) : undefined/);
   assert.match(app, /\.then\(\(shown\) => \{ if \(!shown && session\.value === opener\) loginError\.value = t\("profile\.unavailable"\); \}\)/);
   assert.ok(zh.profile.unavailable && en.profile.unavailable);
+});
+
+test("card actions from search: others get Send message (legacy portal-only too); yourself gets none, so no self-DM", () => {
+  const message = () => {};
+  const self = { selfUid: "11" };
+  assert.deepEqual(profileActions({ uid: "14", message }, self), { select: false, message: true, addToGroup: true });
+  assert.deepEqual(profileActions({ uid: "", openId: "nduc_nd_new", message }, self), { select: false, message: true, addToGroup: false });
+  assert.deepEqual(profileActions({ uid: "", message }, self), { select: false, message: true, addToGroup: false }, "portalUid-only hit");
+  assert.deepEqual(profileActions({ uid: "11", message }, self), { select: false, message: false, addToGroup: false }, "own row");
+  assert.deepEqual(profileActions({ uid: "" }, self), { select: false, message: false, addToGroup: false }, "no address, no caller open");
 });

@@ -71,6 +71,8 @@ export interface ProfileTarget {
   known?: ProfileCardParams["known"];
   /** Picker ⓘ: the card's primary action picks this person. */
   select?: () => void;
+  /** Search page: the card's "Send message" runs the caller's own open (provision, close search). */
+  message?: () => void;
 }
 
 export interface LoaderDeps {
@@ -192,12 +194,13 @@ export function profileParams(
  * messaged (provisioned on click); one with neither uid nor openId cannot.
  */
 export function profileActions(
-  target: Pick<ProfileTarget, "uid" | "openId" | "select">,
+  target: Pick<ProfileTarget, "uid" | "openId" | "select" | "message">,
   context: { selfUid: string; dmUid?: string },
 ): { select: boolean; message: boolean; addToGroup: boolean } {
   if (target.select) return { select: true, message: false, addToGroup: false };
   // An openId-only target is never self: the signed-in user always has a uid row.
-  const other = target.uid ? target.uid !== context.selfUid : !!target.openId;
+  // A legacy portal-only search hit (no uid, no openId) is messaged through the search's own provisioning.
+  const other = target.uid ? target.uid !== context.selfUid : !!(target.openId || target.message);
   return {
     select: false,
     message: other && !(target.uid && target.uid === context.dmUid),

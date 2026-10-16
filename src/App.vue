@@ -1374,15 +1374,17 @@ function openProfile(anchor: HTMLElement, target: ProfileTarget): void {
       if (session.value === messageSession) loginError.value = error instanceof Error ? error.message : t("uid.notFound");
     }
   };
+  const opener = session.value;
   void accountUi.openProfile(anchor, profileParams(session.value, getLocale(), {
     openId, uid, portalUid: openId ? undefined : target.portalUid, known: target.known,
     onSelect: can.select ? target.select : undefined,
-    onMessage: can.message ? () => void message() : undefined,
+    onMessage: can.message ? () => void (target.message ?? message)() : undefined,
     onAddToGroup: !can.addToGroup ? undefined : () => {
       groupDialogOpen.value = false;
       void nextTick(() => showCreateGroup([contact()]));
     },
-  }));
+  // account-ui could not load: say so rather than a click that does nothing.
+  })).then((shown) => { if (!shown && session.value === opener) loginError.value = t("profile.unavailable"); });
 }
 
 function senderProfile(message: Message, event: MouseEvent): void {

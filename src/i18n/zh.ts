@@ -113,6 +113,8 @@ export default {
     // A uid with no account at all (never a nickName fallback, never the number).
     noAccount: "无此账号",
     view: "查看 {name} 的资料",
+    // account-ui could not load: the card cannot open at all (rows and search stay as they are).
+    unavailable: "资料卡暂时无法打开，请稍后重试",
   },
   me: {
     myUid: "我的 UID",
