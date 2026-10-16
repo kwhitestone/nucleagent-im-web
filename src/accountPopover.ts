@@ -21,6 +21,8 @@ export interface AccountPopoverParams {
   manageAccount: () => void;
   locale: "zh" | "en";
   theme?: "light" | "dark";
+  /** OPENID-BLANK-1620: where and as whom the shell resolves your own unknown Open ID; omitted: row as given. */
+  auth?: { base: string; token: string };
 }
 
 export interface AccountPopoverMount {

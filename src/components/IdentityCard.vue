@@ -49,6 +49,8 @@ async function onClick(): Promise<void> {
       phoneMasked: phoneMaskedOf(props.uid),
     },
     locale: getLocale(),
+    // An unknown openId (batch resolve not landed, or failed) is resolved by the shell itself, with Retry.
+    auth: props.token ? { base: authBase, token: props.token } : undefined,
     manageAccount: () => emit("account"),
     logout: () => emit("logout"),
   });
