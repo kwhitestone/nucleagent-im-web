@@ -42,6 +42,8 @@ test("both same-named accounts list apart, each row opens the card with Select, 
   assert.equal(target.uid, "15");
   assert.equal(typeof target.select, "function");
   assert.equal(emitted.some((e) => e[0] === "update:modelValue"), false, "a row click does not select");
+  const rowClicks = [...picker.matchAll(/data-testid="im-picker-row"[\s\S]*?@click="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(rowClicks, Array(2).fill("inspect(contact, $event.currentTarget as HTMLElement)"), "row click = card, in browse and search");
   void host;
 });
 
