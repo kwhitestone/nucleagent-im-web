@@ -81,7 +81,7 @@ import { carryPersisted, earlierCursor, mergeMessages, messageKey, remintGuard }
 import { AgentDirectory, uncontactedAgents, type DirectoryAgent } from "./agents";
 import { buildOutgoingText, mentionCandidates, mentionsMe } from "./mentions";
 import { throttle, unknownGroup } from "./groupSync";
-import { isAgentUnavailableNotice, recipientDisabledKey, sendToEnabledRecipient } from "./send";
+import { isAgentUnavailableNotice, isExecutionFailedNotice, recipientDisabledKey, sendToEnabledRecipient } from "./send";
 import { isAgentRelayed, readProvenance, rejectionCopy } from "./provenance";
 import {
   applyAgentStreamEvent,
@@ -2029,6 +2029,9 @@ onBeforeUnmount(() => {
           <template v-for="message in messages" :key="messageKey(message)">
           <SystemLine v-if="isAgentUnavailableNotice(message.content)" calm data-testid="agent-unavailable-notice">
             {{ t("system.agentUnavailable") }}<br><small>{{ t("system.agentUnavailableHint") }}</small>
+          </SystemLine>
+          <SystemLine v-else-if="isExecutionFailedNotice(message.content)" calm data-testid="agent-failed-notice">
+            {{ rejectionCopy("im_execution_failed", getLocale()) }}
           </SystemLine>
           <article
             v-else
