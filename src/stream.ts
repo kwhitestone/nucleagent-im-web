@@ -30,6 +30,8 @@ export type AgentStreamEvent =
     type: "error";
     sourceKey: string;
     code: string;
+    /** The durable failure notice that replaces this live line once it syncs. */
+    clientMsgNo?: string;
   };
 
 export interface LiveAgentResponse {
@@ -138,6 +140,7 @@ export function parseAgentStreamEvent(message: SSEMessage): AgentStreamEvent | n
       type: "error",
       sourceKey,
       code: String(data.code || "agent_response_failed"),
+      ...(data.clientMsgNo ? { clientMsgNo: String(data.clientMsgNo) } : {}),
     };
   }
   return {
@@ -174,7 +177,7 @@ export function applyAgentStreamEvent(
   };
   if ("revision" in event && event.revision < base.revision) return current;
   const next: LiveAgentResponse = event.type === "error"
-    ? { ...base, status: "error", code: event.code }
+    ? { ...base, status: "error", code: event.code, ...(event.clientMsgNo ? { clientMsgNo: event.clientMsgNo } : {}) }
     : {
       ...base,
       text: event.text,

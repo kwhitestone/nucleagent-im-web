@@ -47,6 +47,7 @@ export function isAgentRelayed(provenance: Provenance | null): boolean {
  */
 export const agentStateCopy: Record<string, { zh: string; en: string }> = {
   im_recipient_disabled: { zh: "智能体已删除", en: "This agent has been deleted." },
+  im_execution_failed: { zh: "智能体这次没能完成回答，请稍后重试", en: "The agent could not complete this request." },
 };
 
 export function rejectionCopy(code: string, locale: "zh" | "en" = "en"): string {

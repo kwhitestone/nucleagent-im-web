@@ -11,6 +11,12 @@ export function isAgentUnavailableNotice(content: unknown): boolean {
   return payload?.systemNotice === "agent_unavailable";
 }
 
+/** The durable notice nucleagent-im posts when an agent run fails (IM-AGENT-FAILURE-NOTICE). */
+export function isExecutionFailedNotice(content: unknown): boolean {
+  const payload = (content as { contentObj?: Record<string, unknown> } | undefined)?.contentObj;
+  return payload?.systemNotice === "execution_failed";
+}
+
 // This protects our client, not arbitrary SDK clients. A transport-wide veto
 // would require a verified WuKong pre-send hook, not msg.notify.
 export async function sendToEnabledRecipient(
