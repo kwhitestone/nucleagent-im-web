@@ -172,6 +172,7 @@ export default {
     details: "了解",
   },
   group: {
+    alreadyIn: "已在群中",
     create: "新建群聊",
     name: "群名称",
     addMembers: "添加成员",

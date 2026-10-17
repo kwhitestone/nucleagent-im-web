@@ -319,6 +319,7 @@ onBeforeUnmount(() => {
         >×</button>
       </header>
 
+      <div ref="cardHost" class="group-card-host" data-testid="im-group-card-host" />
       <form v-if="!group" class="dialog-body form-stack" @submit.prevent="create">
         <label>
           {{ t("group.name") }}
@@ -332,6 +333,8 @@ onBeforeUnmount(() => {
           :label="t('group.members')"
           :placeholder="t('group.searchMembers')"
           :exclude-uids="[Number(session.uid)]"
+          :card-host="cardHost"
+          @profile="(anchor, target) => emit('profile', anchor, target)"
         />
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <button class="primary" type="submit" :disabled="saving || !title.trim()">
@@ -340,7 +343,6 @@ onBeforeUnmount(() => {
       </form>
 
       <template v-else>
-        <div ref="cardHost" class="group-card-host" data-testid="im-group-card-host" />
         <div class="dialog-body" data-testid="im-group-body">
           <p v-if="loading" class="loading">{{ t("chat.loading") }}</p>
           <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -353,7 +355,9 @@ onBeforeUnmount(() => {
               :agents="directoryAgents"
               multiple
               :placeholder="t('group.searchMembers')"
-              :exclude-uids="members.map((member) => member.uid)"
+              :in-group-uids="members.map((member) => member.uid)"
+              :card-host="cardHost"
+              @profile="(anchor, target) => emit('profile', anchor, target)"
             />
           </section>
 
