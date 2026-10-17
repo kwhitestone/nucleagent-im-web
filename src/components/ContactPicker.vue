@@ -28,6 +28,10 @@ const props = withDefaults(defineProps<{
   placeholder?: string;
   /** UNI-IM-REDESIGN: when given, matching agents get their own section above people. */
   agents?: DirectoryAgent[];
+  /** Already in the group: listed greyed with "已在群中", never picked again. */
+  inGroupUids?: number[];
+  /** Group dialog's card area: the profile card renders there, inside the dialog. */
+  cardHost?: HTMLElement | null;
 }>(), {
   modelValue: () => [],
   multiple: false,
@@ -35,6 +39,8 @@ const props = withDefaults(defineProps<{
   label: "",
   placeholder: "",
   agents: () => [],
+  inGroupUids: () => [],
+  cardHost: null,
 });
 
 const emit = defineEmits<{
@@ -102,7 +108,7 @@ async function find(value: string, current: number): Promise<void> {
 // uid is dropped from the people rows below.
 const agentMatches = computed(() => {
   const available = props.agents.filter((agent) =>
-    !props.excludeUids.includes(agent.uid) && !props.modelValue.some((item) => item.id === agent.uid));
+    !props.excludeUids.includes(agent.uid) && !props.inGroupUids.includes(agent.uid) && !props.modelValue.some((item) => item.id === agent.uid));
   return props.multiple && !query.value.trim()
     ? uncontactedAgents(available, [])
     : matchAgents(available, query.value, (uid) => nameFor(uid));
@@ -113,7 +119,7 @@ const peopleResults = computed(() => {
 });
 
 function chooseAgent(agent: DirectoryAgent): void {
-  if (props.excludeUids.includes(agent.uid) || props.modelValue.some((item) => item.id === agent.uid)) return;
+  if (props.excludeUids.includes(agent.uid) || props.inGroupUids.includes(agent.uid) || props.modelValue.some((item) => item.id === agent.uid)) return;
   if (props.multiple) {
     emit("update:modelValue", [...props.modelValue, {
       id: agent.uid, username: agent.name,
@@ -195,6 +201,8 @@ function openBrowse(): void {
 }
 
 function closeOnOutside(event: PointerEvent): void {
+  // The card's own clicks (Select, close) keep the list open: picking goes on.
+  if (props.cardHost?.contains(event.target as Node)) return;
   if (root.value && !root.value.contains(event.target as Node)) open.value = false;
 }
 if (typeof document !== "undefined") document.addEventListener("pointerdown", closeOnOutside);
@@ -229,7 +237,10 @@ function entryKey(entry: DirectoryEntry): string {
 
 // Portal-only people get their local account (and IM uid) on first pick;
 // whatever is sent waits in WuKongIM until they first log in.
+const inGroup = (entry: DirectoryEntry): boolean => !!entry.id && props.inGroupUids.includes(entry.id);
+
 async function choose(entry: DirectoryEntry): Promise<void> {
+  if (inGroup(entry)) return;
   let contact: Contact;
   try {
     contact = await provisionContact(entry, props.session);
@@ -256,7 +267,8 @@ function inspect(entry: DirectoryEntry, anchor: HTMLElement): void {
       nickName: rowName(entry), username: entry.username, avatar: entry.avatar,
       accountType: entry.accountType, provisioned: entry.provisioned,
     },
-    select: () => void choose(entry),
+    select: inGroup(entry) ? undefined : () => void choose(entry),
+    host: props.cardHost ?? undefined,
   });
 }
 
@@ -315,24 +327,25 @@ onBeforeUnmount(() => {
     <!-- Browse mode: everyone, by name. Same rows and badges as search. -->
     <div v-if="browsing" class="contact-results" role="listbox" data-testid="im-directory-browse">
       <div v-for="contact in browseShown" :key="entryKey(contact)" class="contact-row">
-        <button class="contact-result" type="button" role="option" @click="choose(contact)">
+        <button
+          class="contact-result"
+          :class="{ 'in-group': inGroup(contact) }"
+          type="button"
+          role="option"
+          data-testid="im-picker-row"
+          aria-haspopup="dialog"
+          :aria-disabled="inGroup(contact) || undefined"
+          @click="inspect(contact, $event.currentTarget as HTMLElement)"
+        >
           <span>
             <strong>{{ rowName(contact) }}</strong>
             <small v-if="contact.provisioned">{{ rowSub(contact) }}</small>
             <small v-else>{{ portalSub(contact) }}</small>
           </span>
-          <span class="account-badge" :class="contact.provisioned ? contact.accountType : 'portal'">
+          <span v-if="inGroup(contact)" class="account-badge in-group-tag" data-testid="im-picker-in-group">{{ t("group.alreadyIn") }}</span>
+          <span v-else class="account-badge" :class="contact.provisioned ? contact.accountType : 'portal'">
             {{ contact.accountType === "agent" ? t("badge.agent") : t("badge.person") }}
           </span>
-        </button>
-        <button
-          class="contact-info"
-          type="button"
-          data-testid="im-picker-info"
-          :aria-label="t('profile.view', { name: rowName(contact) })"
-          @click="inspect(contact, $event.currentTarget as HTMLElement)"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
         </button>
       </div>
       <p v-if="error" class="picker-status error" role="alert">{{ error }}</p>
@@ -348,7 +361,16 @@ onBeforeUnmount(() => {
     <p v-else-if="error" class="picker-status error" role="alert">{{ error }}</p>
     <div v-else-if="peopleResults.length" class="contact-results" role="listbox">
       <div v-for="contact in peopleResults" :key="entryKey(contact)" class="contact-row">
-        <button class="contact-result" type="button" role="option" @click="choose(contact)">
+        <button
+          class="contact-result"
+          :class="{ 'in-group': inGroup(contact) }"
+          type="button"
+          role="option"
+          data-testid="im-picker-row"
+          aria-haspopup="dialog"
+          :aria-disabled="inGroup(contact) || undefined"
+          @click="inspect(contact, $event.currentTarget as HTMLElement)"
+        >
           <span>
             <strong>{{ rowName(contact) }}</strong>
             <!-- UID stays as secondary text: the only way to tell duplicate names
@@ -356,18 +378,10 @@ onBeforeUnmount(() => {
             <small v-if="contact.provisioned">{{ rowSub(contact) }}</small>
             <small v-else>{{ portalSub(contact) }}</small>
           </span>
-          <span class="account-badge" :class="contact.provisioned ? contact.accountType : 'portal'">
+          <span v-if="inGroup(contact)" class="account-badge in-group-tag" data-testid="im-picker-in-group">{{ t("group.alreadyIn") }}</span>
+          <span v-else class="account-badge" :class="contact.provisioned ? contact.accountType : 'portal'">
             {{ contact.accountType === "agent" ? t("badge.agent") : t("badge.person") }}
           </span>
-        </button>
-        <button
-          class="contact-info"
-          type="button"
-          data-testid="im-picker-info"
-          :aria-label="t('profile.view', { name: rowName(contact) })"
-          @click="inspect(contact, $event.currentTarget as HTMLElement)"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
         </button>
       </div>
       <p v-if="rateLimited" class="picker-status error" role="status" data-testid="im-picker-rate-limited">{{ t("search.rateLimited") }}</p>

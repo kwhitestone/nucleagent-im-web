@@ -49,12 +49,10 @@ async function withBindings(path: string, props: Record<string, unknown>) {
   }
 }
 
-test("picker ⓘ: a separate 44px button per row whose card picks that person", async () => {
+test("picker row: the whole row opens the card, whose primary picks that person (IM-GROUP-ADD-SEARCH)", async () => {
   const src = readFileSync("src/components/ContactPicker.vue", "utf8");
-  assert.equal(src.match(/data-testid="im-picker-info"/g)?.length, 2, "browse and search rows alike");
-  assert.match(src, /:aria-label="t\('profile\.view', \{ name: rowName\(contact\) \}\)"/);
-  const css = readFileSync("src/style.css", "utf8");
-  assert.match(css, /\.contact-info \{[^}]*width: 44px;[^}]*height: 44px;/);
+  assert.equal(src.match(/data-testid="im-picker-row"[\s\S]*?@click="inspect\(contact, \$event\.currentTarget as HTMLElement\)"/g)?.length, 2, "browse and search rows alike");
+  assert.doesNotMatch(src, /@click="choose\(contact\)"/, "a row click never picks directly");
 
   const { bindings, emitted } = await withBindings("src/components/ContactPicker.vue", { session });
   const inspect = bindings.inspect as (entry: unknown, el: unknown) => void;

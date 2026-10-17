@@ -172,6 +172,7 @@ export default {
     details: "Details",
   },
   group: {
+    alreadyIn: "Already in group",
     create: "New group",
     name: "Group name",
     addMembers: "Add members",
