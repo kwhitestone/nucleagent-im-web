@@ -105,7 +105,7 @@ async function refresh() {
     }
   }
 }
-watch(() => props.detail, detail => editor.acceptRefresh(detail));
+watch(() => props.detail, detail => { readGeneration++; editor.acceptRefresh(detail); });
 watch(() => editor.record, value => { if (!value) revokeRead(); });
 function close() {
   if (editor.busy || acting.value) return;
