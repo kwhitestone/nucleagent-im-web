@@ -133,7 +133,7 @@ test("auth failure re-mints the connect token once and reconnects", () => {
   const status = app.slice(app.indexOf("const connectStatusListener"), app.indexOf("const conversationListener"));
   assert.match(status, /reasonCode === 2\)[\s\S]*?if \(remint\.take\(\)\) void remintConnectToken\(\)/);
   assert.match(status, /ConnectStatus\.Connected\)[\s\S]*?remint\.reset\(\)/);
-  assert.match(app, /async function remintConnectToken[\s\S]*?imSession\(\{ accessToken: current\.jwt \}\)[\s\S]*?disconnect\(\)[\s\S]*?configureSDK\(next\)[\s\S]*?sdk\.connect\(\)/);
+  assert.match(app, /async function remintConnectToken[\s\S]*?imSession\(\{ accessToken: current\.jwt \}\)[\s\S]*?disconnect\(\)[\s\S]*?configureSDK\(next, \(\) => session\.value\)[\s\S]*?sdk\.connect\(\)/);
 });
 
 test("load earlier uses the history cursor, never the first (possibly live) message's seq", () => {

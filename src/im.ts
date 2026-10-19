@@ -80,7 +80,38 @@ function rows(value: unknown, key: string): Row[] {
   return [];
 }
 
-export function configureSDK(session: ConnectSession): WKSDK {
+let sdkBinding = 0;
+let syncAbort = new AbortController();
+let syncSession: ConnectSession | undefined;
+
+export function cancelSDKSync(): void {
+  syncAbort.abort();
+  syncAbort = new AbortController();
+  syncSession = undefined;
+  syncing = undefined;
+}
+
+export function configureSDK(
+  session: ConnectSession,
+  currentSession: () => ConnectSession | undefined = () => session,
+): WKSDK {
+  cancelSDKSync();
+  const binding = ++sdkBinding;
+  const stale = () => new DOMException("IM session changed", "AbortError");
+  // Providers outlive shell JWT rotation; capture credentials only for one request.
+  const scope = () => {
+    const current = currentSession();
+    if (binding !== sdkBinding || !current || current.uid !== session.uid) throw stale();
+    if (syncSession !== current) {
+      cancelSDKSync();
+      syncSession = current;
+    }
+    const signal = syncAbort.signal;
+    const check = () => {
+      if (signal.aborted || binding !== sdkBinding || currentSession() !== current) throw stale();
+    };
+    return { current, signal, check };
+  };
   const sdk = WKSDK.shared();
   const config = sdk.config;
   config.uid = session.uid;
@@ -103,16 +134,23 @@ export function configureSDK(session: ConnectSession): WKSDK {
     return info;
   };
   config.provider.syncMessagesCallback = async (channel: Channel, options: SyncOptions) => {
-    const result = await postIM<unknown>("/api/v1/im/channel/messagesync", {
-      channel_id: channel.channelID,
-      channel_type: channel.channelType,
-      start_message_seq: options.startMessageSeq,
-      end_message_seq: options.endMessageSeq,
-      pull_mode: options.pullMode,
-      limit: options.limit,
-      stream_v2: 1,
-    }, session);
-    return rows(result, "messages").map((row) => markPersisted(messageFromRow(row, channel)));
+    const request = scope();
+    try {
+      const result = await postIM<unknown>("/api/v1/im/channel/messagesync", {
+        channel_id: channel.channelID,
+        channel_type: channel.channelType,
+        start_message_seq: options.startMessageSeq,
+        end_message_seq: options.endMessageSeq,
+        pull_mode: options.pullMode,
+        limit: options.limit,
+        stream_v2: 1,
+      }, request.current, request.signal);
+      request.check();
+      return rows(result, "messages").map((row) => markPersisted(messageFromRow(row, channel)));
+    } catch (error) {
+      request.check();
+      throw error;
+    }
   };
   // The SDK's sync() loads the first page; later pages come from loadConversationPage.
   // IM-FIX1: connect, reconnect and "tab back in front" all call sync() and each used to
@@ -126,12 +164,15 @@ export function configureSDK(session: ConnectSession): WKSDK {
     reconciling = new Map();
   }
   config.provider.syncConversationsCallback = () => {
-    syncing ??= (async () => {
+    const request = scope();
+    if (syncing) return syncing;
+    const work = (async () => {
       const all: Conversation[] = [];
       let cursor = "";
       let pages = 0;
       do {
-        const page = await loadConversationPage(session, cursor);
+        const page = await loadConversationPage(request.current, cursor, false, request.signal);
+        request.check();
         all.push(...page.conversations);
         cursor = page.nextCursor;
         pages++;
@@ -139,7 +180,11 @@ export function configureSDK(session: ConnectSession): WKSDK {
       loadedPages = pages;
       conversationCursor = cursor;
       return all;
-    })().finally(() => { syncing = undefined; });
+    })().catch(error => {
+      request.check();
+      throw error;
+    }).finally(() => { if (syncing === work) syncing = undefined; });
+    syncing = work;
     return syncing;
   };
   sdk.config = config;
@@ -170,6 +215,7 @@ export async function loadConversationPage(session: ConnectSession, cursor = "",
   const body: Row = hidden ? { hidden: true } : {};
   if (cursor) body.cursor = cursor;
   const result = await postIM<Row>("/api/v1/im/conversation/list", body, session, signal);
+  signal?.throwIfAborted();
   const conversations = rows(result, "conversations").map(conversationFromRow);
   if (!hidden && session.uid === syncedUid && listed === listedChannels) {
     for (const conversation of conversations) listed.add(conversationKey(conversation.channel));

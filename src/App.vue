@@ -76,7 +76,7 @@ import { profileActions, profileParams, useAccountPopover, type ProfileTarget } 
 import { getLocale } from "./i18n";
 import EmptyPaths from "./components/EmptyPaths.vue";
 import SystemLine from "./components/SystemLine.vue";
-import { configureSDK, loadMoreConversations, markRead, reconcileAckedConversation, sendAcked } from "./im";
+import { cancelSDKSync, configureSDK, loadMoreConversations, markRead, reconcileAckedConversation, sendAcked } from "./im";
 import { channelKey, useConversationBatch } from "./hiding";
 import { carryPersisted, earlierCursor, mergeMessages, messageKey, remintGuard } from "./history";
 import { AgentDirectory, uncontactedAgents, type DirectoryAgent } from "./agents";
@@ -103,6 +103,7 @@ const password = ref("");
 const loginError = ref("");
 const loggingIn = ref(false);
 const session = ref<ConnectSession>();
+watch(session, cancelSDKSync, { flush: "sync" });
 const managementOpen = ref(false);
 const canManageAgents = ref(false);
 const agentDefinitions = createDefinitionApi(sessionTransport(coreBase, () => session.value));
@@ -824,7 +825,7 @@ function startSession(nextSession: ConnectSession): void {
   const epoch = ++directoryEpoch;
   directoryTimer = setTimeout(() => pollAgentDirectory(epoch), 2000);
   void readAgentCapabilities();
-  const sdk = configureSDK(nextSession);
+  const sdk = configureSDK(nextSession, () => session.value);
   installListeners();
   connection.value = "connecting";
   sdk.connect();
@@ -980,10 +981,14 @@ void resumePortalLogin();
 void restoreSession();
 
 async function syncConversations(): Promise<void> {
+  const current = session.value;
   try {
-    conversations.value = await WKSDK.shared().conversationManager.sync();
+    const next = await WKSDK.shared().conversationManager.sync();
+    if (session.value !== current) return;
+    conversations.value = next;
     hasMoreConversations.value = true;
   } catch (error) {
+    if (session.value !== current) return;
     loginError.value = error instanceof Error ? error.message : t("chat.errConversations");
   }
 }
@@ -1040,7 +1045,7 @@ async function remintConnectToken(): Promise<void> {
     if (session.value !== current) return;
     session.value = next;
     WKSDK.shared().disconnect(); // close the refused socket before the SDK opens a new one
-    const sdk = configureSDK(next);
+    const sdk = configureSDK(next, () => session.value);
     connection.value = "connecting";
     sdk.connect();
   } catch {
@@ -1051,6 +1056,7 @@ async function remintConnectToken(): Promise<void> {
 // R5: messages sent while the WS was down never reach this tab live. On (re)connect, pull the
 // open channel's latest page again and merge it; an initial connect with no chat open is a no-op.
 async function refreshActiveHistory(): Promise<void> {
+  const current = session.value;
   const channel = activeChannel.value;
   if (!channel || loadingHistory.value) return;
   const generation = viewGeneration;
@@ -1058,7 +1064,7 @@ async function refreshActiveHistory(): Promise<void> {
     const latest = await WKSDK.shared().chatManager.syncMessages(channel, {
       limit: 30, startMessageSeq: 0, endMessageSeq: 0, pullMode: PullMode.Up,
     });
-    if (generation !== viewGeneration) return;
+    if (generation !== viewGeneration || session.value !== current) return;
     messages.value = mergeMessages(messages.value, latest);
     reconcileResponses();
     scrollToBottom();
