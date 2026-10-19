@@ -10,6 +10,8 @@ await loadRuntimeConfig("https://im.editor.test", async () => new Response(JSON.
   VITE_SHELL_ALLOWED_ORIGINS: "", VITE_ACCOUNT_UI_URL: "",
 })));
 const calls = [];
+const real = new URLSearchParams(location.search).has("real");
+const socketPort = new URLSearchParams(location.search).get("socketPort") ?? "5473";
 const capabilities = { read: true, write: true, writeIdentity: true, delete: true, restore: true,
   readSkills: true, writeSkillBindings: true, readTools: true, writeTools: true, create: true };
 const fieldPolicy = { editablePaths: ["/name", "/config/description"], readOnlyPaths: [],
@@ -22,10 +24,14 @@ const aggregate = () => ({ definition, capabilities, fieldPolicy, skillBindings:
 // No original fetch fallback: all external traffic is intercepted.
 const localFetch = window.fetch.bind(window);
 window.fetch = async (url, init) => {
-  if (String(url).startsWith("http://127.0.0.1:5473/")) return localFetch(url, init);
+  if (String(url).startsWith(`http://127.0.0.1:${socketPort}/`)) return localFetch(url, init);
   const path = new URL(String(url), location.href).pathname;
   const method = init?.method ?? "GET";
   calls.push({ path, method });
+  if (real && new URL(String(url), location.href).origin === "https://core.editor.test") {
+    const target = new URL(String(url));
+    return localFetch(`${target.pathname}${target.search}`, init);
+  }
   let data = [], status = 200;
   if (method === "PATCH" && path.endsWith("/agents/9001")) {
     if (uncertain) throw new TypeError("Synthetic connection lost after write dispatch");
@@ -66,7 +72,7 @@ window.editorHostFixture = {
   revoke: () => { state.canManageAgents = false; },
   connection: () => state.connection,
   async start() {
-    state.startSession({ uid: "synthetic-self", jwt: "synthetic-only", token: "synthetic-only", wsAddr: "ws://127.0.0.1:5473" });
+    state.startSession({ uid: "synthetic-self", jwt: "synthetic-only", token: "synthetic-only", wsAddr: `ws://127.0.0.1:${socketPort}` });
     await nextTick();
     state.canManageAgents = true;
     state.activeChannel = new Channel("synthetic-peer", 1);

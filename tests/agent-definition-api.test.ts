@@ -152,3 +152,40 @@ test("aggregate rejects mismatched ETag, numeric revisions and incomplete policy
     ok({ ...detail, fieldPolicy: { editablePaths: ["/name"] } }),
   ]) await assert.rejects(createDefinitionApi(async () => response).detail(4), /contract|ETag/i);
 });
+
+test("bounded detail omits tools, validates selected IDs and sends tool bindings only with their own capability", async () => {
+  const { tools: _legacy, ...bounded } = detail;
+  const payload = { ...bounded, toolBindings: [3, 47], capabilities: { ...bounded.capabilities, writeToolBindings: true } };
+  const calls: any[] = [];
+  const api = createDefinitionApi(async (path, init) => { calls.push({ path, init }); return ok(payload); });
+  const record = await api.detail(4);
+  assert.equal(Object.hasOwn(record, "tools"), false);
+  assert.deepEqual(record.toolBindings, [3, 47]);
+  await api.patch(record, {}, undefined, [47, 61]);
+  assert.deepEqual(JSON.parse(calls.at(-1).init.body), { changes: {}, toolBindings: [47, 61] });
+  assert.equal(calls.at(-1).init.headers["If-Match"], record.etag);
+  const before = calls.length;
+  await assert.rejects(api.patch({ ...record, capabilities: { ...record.capabilities, writeToolBindings: false } }, {}, undefined, []), /forbidden/);
+  assert.equal(calls.length, before);
+  for (const invalid of [[0], [-1], [1, 1], ["3"], null]) {
+    await assert.rejects(createDefinitionApi(async () => ok({ ...payload, toolBindings: invalid })).detail(4), /contract/);
+  }
+});
+
+test("tool adapter uses bounded third-page search and selected metadata with cancellation", async () => {
+  const controller = new AbortController(), calls: any[] = [];
+  const api = createDefinitionApi(async (path, init) => {
+    calls.push({ path, init });
+    const q = new URL(path, "http://fixture.test").searchParams;
+    return { status: 200, headers: {}, body: { code: 0, data: [{ id: 47, name: "Tool 47", skillIds: [9] }],
+      total: 61, page: Number(q.get("page")), pageSize: Number(q.get("pageSize")), hasMore: true } };
+  });
+  await api.toolsPage({ page: 3, pageSize: 20, search: "tool" }, controller.signal);
+  assert.equal(calls[0].path, "/api/v1/addons/tool/catalog?page=3&pageSize=20&search=tool");
+  assert.equal(calls[0].init.signal, controller.signal);
+  await api.toolsPage({ page: 1, pageSize: 50, search: "", ids: [3, 47] }, controller.signal);
+  assert.match(calls[1].path, /ids=3%2C47$/);
+  await assert.rejects(createDefinitionApi(async () => ({ status: 200, headers: {}, body: {
+    code: 0, data: [{ id: 0, name: "invalid" }], total: 1, page: 1, pageSize: 20, hasMore: false,
+  } })).toolsPage({ page: 1, pageSize: 20, search: "" }), /Invalid tool page/);
+});

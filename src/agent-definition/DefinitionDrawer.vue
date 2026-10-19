@@ -4,11 +4,12 @@ import { useDefinitionFields } from "./useDefinitionFields";
 import { trapDialogFocus } from "./focus";
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { X, Save, RefreshCw, Power, Trash2, RotateCcw, ChevronLeft, ChevronRight, LoaderCircle, Check, TriangleAlert, Wrench } from "@lucide/vue";
+import { X, Save, RefreshCw, Power, Trash2, RotateCcw, ChevronLeft, ChevronRight, LoaderCircle, Check, TriangleAlert } from "@lucide/vue";
 import DefinitionFields, { type ReadonlyField } from "./DefinitionFields.vue";
 import ConflictComparison from "./ConflictComparison.vue";
 import ToolEditor from "./ToolEditor.vue";
 import SkillPicker from "./SkillPicker.vue";
+import ToolBindings from "./ToolBindings.vue";
 import { avatarGradient, avatarUrl, changeCount, dirtyGroups, groupPaths, groups, initial, type Group } from "./groups";
 import { DefinitionError, type Catalog, type DefinitionApi, type Detail, type Impact, type LifecycleAction, type Audit, type Instance } from "./api";
 import { DefinitionEditor, sameImpact } from "./state";
@@ -35,12 +36,14 @@ const acknowledged = ref(false);
 const typedSlug = ref("");
 const acting = ref(false);
 const bindingChoice = ref<"mine" | "current">();
+const toolChoice = ref<"mine" | "current">();
 const audits = ref<Audit[]>([]);
 const instances = ref<Instance[]>([]);
 const page = ref(0);
 const total = ref(0);
 const pageLoading = ref(false);
 const toolId = ref<number>();
+const toolBindings = ref<InstanceType<typeof ToolBindings>>();
 let mounted = true;
 let readGeneration = 0;
 let pageGeneration = 0;
@@ -66,6 +69,16 @@ const selectedSkills = computed(() => (editor.bindings ?? record.value.skillBind
 const skillMetadata = ref<import("./api").Skill[]>([]);
 const availableSkills = computed(() => record.value.capabilities.readSkills
   ? [...new Map([...record.value.skills, ...(props.catalog?.skills ?? [])].map(skill => [skill.id, skill])).values()] : []);
+const selectedTools = computed(() => editor.tools ?? record.value.toolBindings ?? []);
+const canPickTools = computed(() => writable.value && record.value.capabilities.writeToolBindings === true);
+function selectTool(id: number, checked: boolean) {
+  if (!canPickTools.value) return;
+  editor.tools = checked ? [...new Set([...selectedTools.value, id])] : selectedTools.value.filter(value => value !== id);
+}
+function editTool(id: number) {
+  if (!locked.value && record.value.capabilities.readTools) toolId.value = id;
+}
+async function toolChanged() { await Promise.all([refresh(), toolBindings.value?.refresh()]); }
 const impactKeys = ["instances", "conversations", "conversations_7d", "skill_bindings", "im_groups", "deliverables"] as const;
 
 function failure(error: unknown) {
@@ -111,7 +124,7 @@ function selectSkill(skillId: number, checked: boolean) {
     [...(props.catalog?.skills ?? []), ...skillMetadata.value].map(skill => ({ skillId: skill.id, installPath: skill.defaultInstallPath ?? "" })));
 }
 function resolve(choices: Record<string, "mine" | "current">) {
-  try { editor.resolve(choices, bindingChoice.value); bindingChoice.value = undefined; }
+  try { editor.resolve(choices, bindingChoice.value, toolChoice.value); bindingChoice.value = undefined; toolChoice.value = undefined; }
   catch { status.value = "bindingConflict"; }
 }
 async function prepare(next: LifecycleAction | "save") {
@@ -213,8 +226,8 @@ function leave() { if (closing.value) return; closing.value = true; setTimeout((
 const groupLabel: Record<Group, MessageKey> = { basic: "basic", persona: "persona", model: "groupModel", skills: "groupSkills", visibility: "visibility", history: "history", advanced: "advanced" };
 const allPaths = definitionFields.map(field => field.path);
 const activeGroup = ref<Group>("basic");
-const dirtyGroupSet = computed(() => dirtyGroups(editor.changes, editor.bindings));
-const pending = computed(() => changeCount(editor.changes, editor.bindings));
+const dirtyGroupSet = computed(() => dirtyGroups(editor.changes, editor.bindings, editor.tools));
+const pending = computed(() => changeCount(editor.changes, editor.bindings, editor.tools));
 // Backend refuses enabling without an explicit model (422); gate it here instead of failing late.
 const needsModel = computed(() => !record.value.definition.isActive && !String(draftValue("/config/defaults/model") ?? "").trim());
 const canSave = computed(() => record.value.capabilities.write && writable.value && editor.dirty && !editor.current && !editor.verificationRequired && !Object.keys(errors.value).length);
@@ -295,6 +308,10 @@ onUnmounted(() => clearTimeout(toastTimer));
                 <small>{{ editor.current.skillBindings.map(b => availableSkills.find(s => s.id === b.skillId)?.name ?? `#${b.skillId}`).join(', ') || '—' }}</small></label>
             </div>
           </fieldset>
+          <fieldset v-if="editor.toolConflict" class="binding-conflict"><legend>{{ label('tools') }}</legend>
+            <label><input v-model="toolChoice" type="radio" value="mine" name="tools" />{{ label('mine') }}: {{ editor.tools?.join(', ') }}</label>
+            <label><input v-model="toolChoice" type="radio" value="current" name="tools" />{{ label('current') }}: {{ editor.current.toolBindings?.join(', ') }}</label>
+          </fieldset>
           <ConflictComparison :baseline="record.definition" :changes="editor.changes" :current="editor.current.definition" @resolve="resolve" />
         </section>
         <p v-if="catalogError" role="status" class="notice warn">{{ label('catalogError') }}</p>
@@ -307,12 +324,9 @@ onUnmounted(() => clearTimeout(toastTimer));
             :fetch-page="api.skillsPage" @metadata="skillMetadata = $event" @toggle="selectSkill" />
           <h4>{{ label('tools') }}</h4>
           <p class="notice warn small"><TriangleAlert :size="14" aria-hidden="true" />{{ label('sharedNote') }}</p>
-          <p v-if="!record.tools.length" class="muted">{{ label('emptyResources') }}</p>
-          <article v-for="tool in record.tools" :key="tool.id" class="resource">
-            <span class="tool-icon" aria-hidden="true"><Wrench :size="14" /></span>
-            <div><strong>{{ tool.name }}</strong><small>{{ tool.slug }} · {{ label('revision') }} {{ tool.revision }}</small></div>
-            <button v-if="record.capabilities.readTools" type="button" class="ghost" @click="toolId = tool.id">{{ label('edit') }}</button>
-          </article>
+          <ToolBindings v-if="record.capabilities.readTools" ref="toolBindings" :selected="selectedTools"
+            :skill-ids="selectedSkills" :editable="canPickTools" :manageable="!locked && record.capabilities.readTools"
+            :fetch-page="api.toolsPage" @toggle="selectTool" @edit="editTool" />
         </template>
       </template>
       <template #lifecycle="{ groupId }">
@@ -384,7 +398,7 @@ onUnmounted(() => clearTimeout(toastTimer));
       <button v-if="record.capabilities.write" type="button" class="primary" :disabled="!writable || !editor.dirty || !!editor.current || editor.verificationRequired || !!Object.keys(errors).length" @click="prepare('save')"><LoaderCircle v-if="editor.busy || acting" :size="16" class="spin" /><Save v-else :size="16" />{{ label(editor.busy ? 'saving' : 'save') }}</button>
     </footer>
     <p v-if="status === 'saved'" role="status" class="toast"><Check :size="16" aria-hidden="true" />{{ label('savedToast') }}</p>
-    <ToolEditor v-if="toolId" :id="toolId" :api="api" @close="toolId = undefined" @changed="refresh" />
+    <ToolEditor v-if="toolId" :id="toolId" :api="api" @close="toolId = undefined" @changed="toolChanged" />
   </dialog>
 </template>
 

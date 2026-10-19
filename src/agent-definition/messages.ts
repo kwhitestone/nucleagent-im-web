@@ -5,6 +5,8 @@ export const messages = {
   prompt: ["系统提示词", "System prompt"], memory: ["跨会话记忆", "Cross-session memory"],
   backend: ["执行后端", "Execution backend"], provider: ["供应商", "Provider"], model: ["默认模型", "Default model"],
   fields: ["定义", "Definition"], skills: ["技能绑定", "Skill bindings"], tools: ["共享工具", "Shared tools"],
+  searchTools: ["搜索工具", "Search tools"], selectedTools: ["已选工具", "Selected tools"],
+  toolCovered: ["技能已包含", "Included by a skill"], toolUnavailable: ["不可用", "Unavailable"],
   metadata: ["配置与来源", "Configuration and sources"], readonly: ["只读：服务端未授予此字段写权限", "Read-only: the server has not granted write access"],
   preserved: ["服务端保留，不可见", "Retained by the server; hidden"],
   unavailable: ["不可用", "Unavailable"], inherit: ["平台默认", "Platform default"],

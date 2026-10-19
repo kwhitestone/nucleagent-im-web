@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "343ecc863b3750a1165593b507e73e808b5e06ca",
+  "sourceCommit": "7f5f84336496fd4e4cdf73d7ad464ef9de23873c",
   "coreSource": "21d2c188c1623682b008bc1b360fb01afa36079f",
   "builder": {
     "node": "v24.14.0",
@@ -13,13 +13,14 @@
     "dist/EditorFields.vue.d.ts": "c49242709bd9eb0b3c0b1df1ed99dfcdda9e5e26572c71cc65a08ec0ae2c701d",
     "dist/EditorLayout.vue.d.ts": "628bd487a95d49c497a23563c227e9fc5fe762270ec5a0818eedf18462c0fad3",
     "dist/EditorView.vue.d.ts": "334caf6fd0d3445e1b47e3597a86c05a9fd048c282aaf55f9854917bf5392ee7",
-    "dist/editor.css": "a82b96edfd7950ee4bfdc9f9c296efdb3bd66ce281889b7cb8c9ead9469290f2",
-    "dist/editor.js": "e65fb3d7804392a6487715528a690d8403ce61a67e8af0c939ffb141242755d2",
-    "dist/index.d.ts": "593b84888d8803e2fc905427be764ecd3bd3e7947062afaab297ac4750883888"
+    "dist/ToolBindings.vue.d.ts": "34c1beef9a23e27d7e98089980924b2a36115c795e072b4b81e3b02b67366273",
+    "dist/editor.css": "ab330531d687b65a9be56284293e82a4530b4fdbd309d431fb6f6043f0505c6d",
+    "dist/editor.js": "c0365690823fb1842af98e1dd77854856189f0fabb9b7f6f98272880d3ac9e65",
+    "dist/index.d.ts": "1968679dcd1c7a7e55052aafa035ced8876643045800158ccc0fbf4dd3c97e8b"
   },
   "name": "@prism-fusion/editor-ui",
   "version": "0.1.0",
-  "filename": "editor-ui-86525ace8f785a60d713c5030212f40767e3da97ccef973aa6a29c406f09b935.tgz",
-  "sha256": "86525ace8f785a60d713c5030212f40767e3da97ccef973aa6a29c406f09b935",
-  "integrity": "sha512-xQ3/mfyK9qixDu173RZX7jf7VzWUgq0bcl+1Ek5C05+N6SP4hhuVYEWJ9EYT2fya31dNY0a/Gffgerj84Hjp/w=="
+  "filename": "editor-ui-e879607374da7f17a41ee0e0187a06d6eaea26da4b625ee0c62a6c21bb944214.tgz",
+  "sha256": "e879607374da7f17a41ee0e0187a06d6eaea26da4b625ee0c62a6c21bb944214",
+  "integrity": "sha512-uWDdQVgmgA28ewV1uQkBKNicU10eO0qW2yn+DzT7egpuXpI761Gs/yuPmBNI6L7PmM9q8PHky6zNg3hNdA17QQ=="
 }
