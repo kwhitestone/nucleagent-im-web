@@ -63,6 +63,44 @@ function conflicted() {
   return editor;
 }
 
+test("drawer: revocation supersedes an in-flight read and stale tool conflict choice", async () => {
+  const first = { ...record("1", "original"), toolBindings: [1] };
+  first.capabilities.writeToolBindings = true;
+  let finish!: (value: Detail) => void;
+  const props = reactive({ detail: first, api: {
+    models: async () => [], backends: async () => [], genModels: async () => [],
+    detail: () => new Promise<Detail>(resolve => { finish = resolve; }),
+  } });
+  let instance: ComponentInternalInstance | null = null;
+  const app = renderer.createApp({ render: () => h(drawer, { ...props,
+    onVnodeMounted: (vnode: { component: ComponentInternalInstance | null }) => { instance = vnode.component; },
+  }) });
+  app.use(createI18n({ legacy: false, locale: "en", messages: { en: {} } }));
+  app.provide(ssrContextKey, {}); app.mount({});
+  try {
+    const state = instance!.setupState as unknown as {
+      editor: DefinitionEditor; toolChoice?: "mine" | "current"; refresh(): Promise<void>;
+      resolve(choices: Record<string, "mine" | "current">): void;
+    };
+    state.editor.tools = [2, 47];
+    props.detail = { ...first, definition: { ...first.definition, revision: "2" }, toolBindings: [3] };
+    await nextTick();
+    assert.equal(state.editor.toolConflict, true);
+    state.toolChoice = "mine";
+    const pending = state.refresh();
+    props.detail = { ...props.detail, capabilities: { ...first.capabilities, readTools: false, writeToolBindings: false },
+      tools: undefined, toolBindings: [] };
+    await nextTick();
+    finish({ ...first, definition: { ...first.definition, revision: "3" }, toolBindings: [99] });
+    await pending;
+    state.resolve({});
+    assert.equal(state.editor.record?.capabilities.readTools, false);
+    assert.deepEqual(state.editor.record?.toolBindings, []);
+    assert.equal(state.editor.tools, undefined);
+    assert.equal(state.editor.current, null);
+  } finally { app.unmount(); }
+});
+
 test("same-revision refresh keeps the conflict choice and Apply enabled", async () => {
   const editor = conflicted();
   const { app, state } = mount(editor);

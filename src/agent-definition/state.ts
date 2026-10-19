@@ -14,6 +14,7 @@ export class DefinitionEditor {
   error = "";
   verificationRequired = false;
   private generation = 0;
+  private refreshGeneration = 0;
 
   get dirty(): boolean { return Object.keys(this.changes).length > 0 || this.bindings !== undefined || this.tools !== undefined; }
   get bindingConflict(): boolean {
@@ -47,6 +48,7 @@ export class DefinitionEditor {
     if (!this.record || record.definition.id !== this.record.definition.id) return;
     if (!record.capabilities.read) { this.revokeRead(); return; }
     if (newerRevision((this.current ?? this.record).definition.revision, record.definition.revision)) return;
+    this.refreshGeneration++;
     if (!record.capabilities.readTools) record = { ...record, tools: undefined, toolBindings: [] };
     this.verificationRequired = false;
     if (this.error === "uncertain") this.error = "";
@@ -61,16 +63,26 @@ export class DefinitionEditor {
       ...(!record.capabilities.readTools ? { tools: undefined, toolBindings: [] } : {}) };
     if (!record.capabilities.readSkills) this.bindings = undefined;
     if (!record.capabilities.readTools || record.capabilities.writeToolBindings !== true) this.tools = undefined;
-    if (this.dirty && changed) {
+    if (this.dirty && (changed || this.current)) {
       // An identical re-read (412 reread, then the event poll) keeps the open comparison and the user's choices.
       if (JSON.stringify(record) !== JSON.stringify(this.current)) this.current = record;
       this.error = "conflict";
     }
-    else if (!this.dirty) this.record = record;
+    else if (!this.dirty) {
+      this.record = record; this.current = null;
+      if (this.error === "conflict") this.error = "";
+    }
     else this.record = { ...this.record, capabilities: record.capabilities, fieldPolicy: record.fieldPolicy };
   }
   resolve(choices: Record<string, "mine" | "current">, bindingChoice?: "mine" | "current", toolChoice?: "mine" | "current"): void {
     if (!this.record || !this.current) return;
+    // Conflict data is not an authority source; use the latest accepted policy.
+    const { capabilities, fieldPolicy } = this.record;
+    this.current = { ...this.current, capabilities, fieldPolicy,
+      ...(!capabilities.readSkills ? { skills: [], skillBindings: [] } : {}),
+      ...(!capabilities.readTools ? { tools: undefined, toolBindings: [] } : {}) };
+    if (!capabilities.readSkills) this.bindings = undefined;
+    if (!capabilities.readTools || capabilities.writeToolBindings !== true) this.tools = undefined;
     if (this.bindingConflict && !bindingChoice) throw new Error("Explicit binding choice required");
     if (this.toolConflict && !toolChoice) throw new Error("Explicit tool binding choice required");
     this.changes = rebaseChanges(this.record.definition, this.changes, this.current.definition, choices);
@@ -83,24 +95,40 @@ export class DefinitionEditor {
   async save(api: DefinitionApi): Promise<Detail | null> {
     if (!this.record?.capabilities.write || !this.dirty || this.busy || this.denied || this.current || this.verificationRequired) return null;
     const generation = this.generation;
+    const refreshGeneration = this.refreshGeneration;
     const record = this.record;
     this.busy = true; this.error = "";
     try {
       const saved = await api.patch(record, this.changes, this.bindings, this.tools);
       if (generation !== this.generation) return null;
+      if (refreshGeneration !== this.refreshGeneration) {
+        const accepted = this.current ?? this.record;
+        // An own-write event may arrive first; only an identical accepted snapshot can complete it.
+        if (JSON.stringify(saved) === JSON.stringify(accepted)) {
+          this.open(accepted);
+          return accepted;
+        }
+        this.verificationRequired = true; this.error = "uncertain"; return null;
+      }
       this.open(saved);
       return saved;
     } catch (error) {
       if (generation !== this.generation) return null;
+      if (refreshGeneration !== this.refreshGeneration) {
+        if (!(error instanceof DefinitionError) || error.status >= 500) {
+          this.verificationRequired = true; this.error = "uncertain";
+        }
+        return null;
+      }
       if (error instanceof DefinitionError && [401, 403].includes(error.status)) {
         this.denied = true; this.error = "denied";
       } else if (error instanceof DefinitionError && error.status === 412) {
         this.error = "conflict";
         try {
           const current = await api.detail(record.definition.id);
-          if (generation === this.generation) this.acceptRefresh(current);
+          if (generation === this.generation && refreshGeneration === this.refreshGeneration) this.acceptRefresh(current);
         } catch (refreshError) {
-          if (generation === this.generation && refreshError instanceof DefinitionError && [401, 403].includes(refreshError.status)) {
+          if (generation === this.generation && refreshGeneration === this.refreshGeneration && refreshError instanceof DefinitionError && [401, 403].includes(refreshError.status)) {
             this.revokeRead();
           }
         }
