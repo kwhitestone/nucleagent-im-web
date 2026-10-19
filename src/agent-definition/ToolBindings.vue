@@ -55,7 +55,7 @@ defineExpose({ refresh });
 </script>
 
 <template>
-  <BindingList :rows="visible" :selected="selected" :unavailable="unavailable" :editable="editable"
+  <BindingList @focusin.stop @pointerdown.stop @pointercancel.stop @mousedown.stop @touchstart.stop @touchcancel.stop @click.stop :rows="visible" :selected="selected" :unavailable="unavailable" :editable="editable"
     :manageable="manageable" v-model:query="query" v-model:selected-only="selectedOnly"
     :search-label="text('searchTools', locale)" :selected-label="text('selectedTools', locale)"
     :edit-label="text('edit', locale)" :covered-label="text('toolCovered', locale)" :unavailable-label="text('toolUnavailable', locale)"
