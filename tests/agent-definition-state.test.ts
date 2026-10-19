@@ -140,3 +140,29 @@ test("412 detail permission loss is applied before displaying the conflict", asy
   assert.equal(editor.record?.capabilities.write, false);
   assert.equal(editor.denied, true);
 });
+
+test("pending tool selection survives 412, requires explicit resolution and clears on cancel/revocation", async () => {
+  const first = { ...record(), toolBindings: [1] };
+  first.capabilities.writeToolBindings = true;
+  const current = { ...first, definition: { ...first.definition, revision: "2" }, etag: '"agent-1-2"', toolBindings: [3] };
+  const editor = new DefinitionEditor();
+  editor.open(first); editor.tools = [2, 47];
+  assert.equal(editor.dirty, true);
+  await editor.save(api({
+    patch: async (_record, _changes, _skills, tools) => {
+      assert.deepEqual(tools, [2, 47]); throw new DefinitionError(412, "conflict");
+    },
+    detail: async () => current,
+  }));
+  assert.deepEqual(editor.tools, [2, 47]);
+  assert.throws(() => editor.resolve({}), /tool binding choice/);
+  editor.resolve({}, undefined, "mine");
+  assert.equal(editor.record?.etag, '"agent-1-2"');
+  editor.clear();
+  assert.equal(editor.tools, undefined);
+  assert.equal(editor.dirty, false);
+  editor.open(first); editor.tools = [47];
+  editor.acceptRefresh({ ...current, capabilities: { ...current.capabilities, readTools: false, writeToolBindings: false } });
+  assert.equal(editor.tools, undefined);
+  assert.deepEqual(editor.record?.toolBindings, []);
+});

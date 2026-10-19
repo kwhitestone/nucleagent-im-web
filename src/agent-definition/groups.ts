@@ -10,13 +10,13 @@ export function fieldGroup(path: string): Group {
 }
 export const groupPaths = (group: Group, paths: readonly string[]) => paths.filter(path => fieldGroup(path) === group);
 
-export function dirtyGroups(changes: Record<string, unknown>, bindings: unknown[] | undefined): Set<Group> {
+export function dirtyGroups(changes: Record<string, unknown>, bindings: unknown[] | undefined, tools?: number[]): Set<Group> {
   const dirty = new Set(Object.keys(changes).map(fieldGroup));
-  if (bindings !== undefined) dirty.add("skills");
+  if (bindings !== undefined || tools !== undefined) dirty.add("skills");
   return dirty;
 }
-export const changeCount = (changes: Record<string, unknown>, bindings: unknown[] | undefined) =>
-  Object.keys(changes).length + (bindings === undefined ? 0 : 1);
+export const changeCount = (changes: Record<string, unknown>, bindings: unknown[] | undefined, tools?: number[]) =>
+  Object.keys(changes).length + (bindings === undefined ? 0 : 1) + (tools === undefined ? 0 : 1);
 
 export function avatarUrl(value: unknown): string {
   if (typeof value !== "string") return "";

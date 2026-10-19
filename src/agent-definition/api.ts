@@ -10,6 +10,7 @@ export interface Definition {
 export interface Capabilities {
   read: boolean; write: boolean; writeIdentity: boolean; delete: boolean; restore: boolean;
   readSkills: boolean; writeSkillBindings: boolean; readTools: boolean; writeTools: boolean;
+  writeToolBindings?: boolean;
 }
 export interface FieldPolicy {
   editablePaths: string[]; readOnlyPaths: string[]; protectedPaths: string[];
@@ -30,9 +31,12 @@ export interface Tool {
   config?: Record<string, unknown>; i18n?: Record<string, unknown>;
 }
 export interface ToolDetail { tool: Tool; capabilities: { read: boolean; write: boolean }; fieldPolicy: FieldPolicy; etag: string }
+export interface ToolOption {
+  id: number; name: string; skillIds?: number[]; i18n?: Record<string, unknown>;
+}
 export interface Detail {
   definition: Definition; capabilities: Capabilities; fieldPolicy: FieldPolicy;
-  skillBindings: Binding[]; skills: Skill[]; tools: Tool[];
+  skillBindings: Binding[]; skills: Skill[]; tools?: Tool[]; toolBindings?: number[];
   effective: { revision: string; definitionRevision: string; dependencies?: unknown[]; modelRule?: string; promptRule?: string; inFlightRule?: string; overrideRule?: string };
   identity: { uid: number | null; status: "pending" | "ready" | "failed"; projectionRevision?: string; lastErrorCode?: string };
   instanceCount?: number; sessions7d?: number; etag: string;
@@ -69,6 +73,8 @@ const idPath = (id: number) => {
 const strongETag = (value: string | undefined): value is string => !!value && /^"[^"\r\n]+"$/.test(value);
 const revision = (value: unknown): value is string => typeof value === "string" && /^\d+$/.test(value);
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(v => typeof v === "string");
+const toolIds = (value: unknown): value is number[] => Array.isArray(value) && value.length <= 50
+  && value.every(id => Number.isSafeInteger(id) && id > 0) && new Set(value).size === value.length;
 function validSchemaRule(rule: SchemaPropertyRule): boolean {
   const root = "/config/mcp_config/input_schema";
   if (!rule || typeof rule.parentPath !== "string"
@@ -142,7 +148,9 @@ export function createDefinitionApi(transport: Transport) {
     if (!d.definition || !Number.isSafeInteger(d.definition.id) || d.definition.id < 1 || !revision(d.definition.revision)
       || result.etag !== `"agent-${d.definition.id}-${d.definition.revision}"`
       || !validCapabilities(d.capabilities) || !validPolicy(d.fieldPolicy) || !Array.isArray(d.skillBindings)
-      || !Array.isArray(d.skills) || !Array.isArray(d.tools)
+      || !Array.isArray(d.skills) || (d.tools !== undefined && !Array.isArray(d.tools))
+      || (d.toolBindings !== undefined && !toolIds(d.toolBindings))
+      || (d.capabilities.writeToolBindings !== undefined && typeof d.capabilities.writeToolBindings !== "boolean")
       || !d.effective?.revision || !d.identity) throw new Error("Invalid definition contract");
     return { ...d, etag: result.etag };
   }
@@ -159,6 +167,21 @@ export function createDefinitionApi(transport: Transport) {
     return { ...d, etag: result.etag };
   }
   return {
+    async toolsPage(params: PageParams & { ids?: number[] }, signal?: AbortSignal): Promise<PageResult<ToolOption>> {
+      const query = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize), search: params.search });
+      if (params.ids) query.set("ids", params.ids.join(","));
+      const response = await transport(`/api/v1/addons/tool/catalog?${query}`, { cache: "no-store", signal });
+      const body = response.body as PageResult<ToolOption> & { code?: number | string };
+      if (response.status !== 200 || body?.code !== 0) throw new DefinitionError(response.status, "tool_page_failed");
+      if (!Array.isArray(body.data) || !Number.isSafeInteger(body.total) || body.total < 0
+        || body.page !== params.page || body.pageSize !== params.pageSize || typeof body.hasMore !== "boolean"
+        || body.data.length > params.pageSize || !body.data.every(row => row && Number.isSafeInteger(row.id) && row.id > 0
+          && typeof row.name === "string" && (row.skillIds === undefined
+            || (Array.isArray(row.skillIds) && row.skillIds.every(id => Number.isSafeInteger(id) && id > 0))))) {
+        throw new Error("Invalid tool page");
+      }
+      return body;
+    },
     async skillsPage(params: PageParams & { ids?: number[] }, signal?: AbortSignal): Promise<PageResult<Skill>> {
       const query = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize), search: params.search });
       if (params.ids) query.set("ids", params.ids.join(","));
@@ -232,12 +255,14 @@ export function createDefinitionApi(transport: Transport) {
     async detail(id: number): Promise<Detail> {
       return aggregate(await request<Omit<Detail, "etag">>(idPath(id)));
     },
-    async patch(record: Detail, changes: Changes, skillBindings?: Binding[]): Promise<Detail> {
-      if (!record.capabilities.write || (skillBindings !== undefined && !record.capabilities.writeSkillBindings)) {
+    async patch(record: Detail, changes: Changes, skillBindings?: Binding[], toolBindings?: number[]): Promise<Detail> {
+      if (!record.capabilities.write || (skillBindings !== undefined && !record.capabilities.writeSkillBindings)
+        || (toolBindings !== undefined && record.capabilities.writeToolBindings !== true)) {
         throw new DefinitionError(403, "forbidden");
       }
+      if (toolBindings !== undefined && !toolIds(toolBindings)) throw new DefinitionError(422, "invalid_tool_bindings");
       const body = { changes: buildChanges(record.definition, changes, record.fieldPolicy.editablePaths),
-        ...(skillBindings === undefined ? {} : { skillBindings }) };
+        ...(skillBindings === undefined ? {} : { skillBindings }), ...(toolBindings === undefined ? {} : { toolBindings }) };
       return aggregate(await request<Omit<Detail, "etag">>(idPath(record.definition.id), mutation(record, "PATCH", body)));
     },
     async lifecycle(record: Detail, action: LifecycleAction): Promise<Detail> {
