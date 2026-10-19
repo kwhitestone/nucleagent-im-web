@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { EditorView, DiscardDialog } from "@prism-fusion/editor-ui";
+import { useDefinitionFields } from "./useDefinitionFields";
 import { trapDialogFocus } from "./focus";
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -7,7 +9,6 @@ import DefinitionFields, { type ReadonlyField } from "./DefinitionFields.vue";
 import ConflictComparison from "./ConflictComparison.vue";
 import ToolEditor from "./ToolEditor.vue";
 import SkillPicker from "./SkillPicker.vue";
-import AgentPreview from "./AgentPreview.vue";
 import { avatarGradient, avatarUrl, changeCount, dirtyGroups, groupPaths, groups, initial, type Group } from "./groups";
 import { DefinitionError, type Catalog, type DefinitionApi, type Detail, type Impact, type LifecycleAction, type Audit, type Instance } from "./api";
 import { DefinitionEditor, sameImpact } from "./state";
@@ -62,6 +63,7 @@ const readonlyFields = computed<ReadonlyField[]>(() => {
     ...policy.unknownPaths.map(field => ({ ...field, reason: label("unknownReason"), hidden: true }))];
 });
 const selectedSkills = computed(() => (editor.bindings ?? record.value.skillBindings).map(item => item.skillId));
+const skillMetadata = ref<import("./api").Skill[]>([]);
 const availableSkills = computed(() => record.value.capabilities.readSkills
   ? [...new Map([...record.value.skills, ...(props.catalog?.skills ?? [])].map(skill => [skill.id, skill])).values()] : []);
 const impactKeys = ["instances", "conversations", "conversations_7d", "skill_bindings", "im_groups", "deliverables"] as const;
@@ -105,8 +107,8 @@ function selectSkill(skillId: number, checked: boolean) {
   if (!writable.value || !record.value.capabilities.writeSkillBindings) return;
   const selected = selectedSkills.value.filter(id => id !== skillId);
   if (checked) selected.push(skillId);
-  editor.bindings = reconcileBindings(record.value.skillBindings, selected,
-    (props.catalog?.skills ?? []).map(skill => ({ skillId: skill.id, installPath: skill.defaultInstallPath ?? "" })));
+  editor.bindings = reconcileBindings(editor.bindings ?? record.value.skillBindings, selected,
+    [...(props.catalog?.skills ?? []), ...skillMetadata.value].map(skill => ({ skillId: skill.id, installPath: skill.defaultInstallPath ?? "" })));
 }
 function resolve(choices: Record<string, "mine" | "current">) {
   try { editor.resolve(choices, bindingChoice.value); bindingChoice.value = undefined; }
@@ -211,7 +213,6 @@ function leave() { if (closing.value) return; closing.value = true; setTimeout((
 const groupLabel: Record<Group, MessageKey> = { basic: "basic", persona: "persona", model: "groupModel", skills: "groupSkills", visibility: "visibility", history: "history", advanced: "advanced" };
 const allPaths = definitionFields.map(field => field.path);
 const activeGroup = ref<Group>("basic");
-const body = ref<HTMLElement>();
 const dirtyGroupSet = computed(() => dirtyGroups(editor.changes, editor.bindings));
 const pending = computed(() => changeCount(editor.changes, editor.bindings));
 // Backend refuses enabling without an explicit model (422); gate it here instead of failing late.
@@ -222,24 +223,25 @@ const draftName = computed(() => String(draftValue("/name") ?? ""));
 const headerAvatar = computed(() => avatarUrl(draftValue("/config/avatar")));
 const alertKey = computed(() => (editor.error === "conflict" && editor.current) ? "" : editor.error || (status.value === "saved" ? "" : status.value));
 const installPath = (id: number) => (editor.bindings ?? record.value.skillBindings).find(item => item.skillId === id)?.installPath || "";
-function goTo(group: Group) {
-  activeGroup.value = group;
+function selectGroup(group: string) {
+  if (!groups.includes(group as Group)) return;
+  activeGroup.value = group as Group;
   if (group === "history" && !["usage", "audits"].includes(tab.value)) tab.value = "usage";
-  body.value?.querySelector(`#group-${group}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
-function onNavKey(event: KeyboardEvent) {
-  const step = ["ArrowDown", "ArrowRight"].includes(event.key) ? 1 : ["ArrowUp", "ArrowLeft"].includes(event.key) ? -1 : 0;
-  if (!step) return;
-  event.preventDefault();
-  const next = groups[(groups.indexOf(activeGroup.value) + step + groups.length) % groups.length]!;
-  goTo(next);
-  void nextTick(() => (dialog.value?.querySelector(`[role=tab][data-group="${next}"]`) as HTMLElement | null)?.focus());
-}
-function onScroll() {
-  const top = body.value?.getBoundingClientRect().top ?? 0;
-  const passed = groups.filter(group => (body.value?.querySelector(`#group-${group}`)?.getBoundingClientRect().top ?? Infinity) - top < 80);
-  if (passed.length) activeGroup.value = passed.at(-1)!;
-}
+const { controls, update: updateField, touched } = useDefinitionFields({
+  get baseline() { return record.value.definition; },
+  get changes() { return editor.changes; },
+  get editablePaths() { return record.value.capabilities.write && !editor.denied ? record.value.fieldPolicy.editablePaths : []; },
+  get readonlyFields() { return readonlyFields.value; },
+  get backends() { return backends.value.map(item => ({ value: item.id, label: item.displayName })); },
+  get providers() { return providerChoices.value; },
+  get models() { return modelChoices.value; },
+  get busy() { return locked.value; },
+}, (_event, path, value) => change(path, value));
+const editorGroups = computed(() => groups.map(id => ({
+  id, label: label(groupLabel[id]), dirty: dirtyGroupSet.value.has(id),
+  fields: controls.value.filter(field => groupPaths(id, allPaths).includes(field.path)),
+})));
 function shortcut(event: KeyboardEvent) {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();
@@ -275,11 +277,9 @@ onUnmounted(() => clearTimeout(toastTimer));
       </div>
     </header>
     <div v-if="!editor.record" class="drawer-body"><p role="alert">{{ label('readDenied') }}</p><button type="button" @click="emit('close')">{{ label('close') }}</button></div>
-    <div v-else class="drawer-grid">
-      <nav class="group-nav" role="tablist" aria-orientation="vertical" :aria-label="label('title')" @keydown="onNavKey">
-        <button v-for="group in groups" :key="group" type="button" role="tab" :data-group="group" :aria-selected="activeGroup === group" :tabindex="activeGroup === group ? 0 : -1" @click="goTo(group)">{{ label(groupLabel[group]) }}<span v-if="dirtyGroupSet.has(group)" class="dirty-dot" :aria-label="label('unsaved')"></span></button>
-      </nav>
-      <div ref="body" class="drawer-body" @scroll.passive="onScroll">
+    <EditorView v-else :groups="editorGroups" :active="activeGroup" :ariaLabel="label('title')"
+      :dirty-label="label('unsaved')" :busy="locked" @select="selectGroup" @change="updateField" @touch="touched.add($event)">
+      <template #status>
         <p v-if="alertKey" role="alert" class="notice" :class="editor.error === 'uncertain' ? 'warn' : 'error'"><TriangleAlert :size="16" aria-hidden="true" />{{ label(alertKey as MessageKey) }}
           <button v-if="editor.verificationRequired" type="button" class="ghost" @click="refresh">{{ label('queryResult') }}</button></p>
         <p v-if="!record.capabilities.write" class="notice muted-note">{{ label('viewOnly') }}</p>
@@ -298,17 +298,13 @@ onUnmounted(() => clearTimeout(toastTimer));
           <ConflictComparison :baseline="record.definition" :changes="editor.changes" :current="editor.current.definition" @resolve="resolve" />
         </section>
         <p v-if="catalogError" role="status" class="notice warn">{{ label('catalogError') }}</p>
-        <section v-for="group in (['basic', 'persona', 'model'] as const)" :id="`group-${group}`" :key="group" class="form-card">
-          <h3>{{ label(groupLabel[group]) }}<span v-if="dirtyGroupSet.has(group)" class="dirty-dot" aria-hidden="true"></span></h3>
-          <DefinitionFields :only="groupPaths(group, allPaths)" :baseline="record.definition" :changes="editor.changes" :editable-paths="record.capabilities.write && !editor.denied ? record.fieldPolicy.editablePaths : []"
-            :readonly-fields="readonlyFields" :backends="backends.map(item => ({ value: item.id, label: item.displayName }))"
-            :providers="providerChoices" :models="modelChoices" :busy="locked" @change="change" />
-        </section>
-        <section id="group-skills" class="form-card">
-          <h3>{{ label('groupSkills') }}<span v-if="dirtyGroupSet.has('skills')" class="dirty-dot" aria-hidden="true"></span></h3>
+      </template>
+      <template #bindings="{ groupId }">
+        <template v-if="groupId === 'skills'">
           <h4>{{ label('skills') }}</h4>
           <p v-if="!record.capabilities.readSkills" class="muted">{{ label('readonly') }}</p>
-          <SkillPicker v-else :skills="availableSkills" :selected="selectedSkills" :editable="writable && record.capabilities.writeSkillBindings" :install-path="installPath" @toggle="selectSkill" />
+          <SkillPicker v-else :skills="availableSkills" :selected="selectedSkills" :editable="writable && record.capabilities.writeSkillBindings" :install-path="installPath"
+            :fetch-page="api.skillsPage" @metadata="skillMetadata = $event" @toggle="selectSkill" />
           <h4>{{ label('tools') }}</h4>
           <p class="notice warn small"><TriangleAlert :size="14" aria-hidden="true" />{{ label('sharedNote') }}</p>
           <p v-if="!record.tools.length" class="muted">{{ label('emptyResources') }}</p>
@@ -317,8 +313,10 @@ onUnmounted(() => clearTimeout(toastTimer));
             <div><strong>{{ tool.name }}</strong><small>{{ tool.slug }} · {{ label('revision') }} {{ tool.revision }}</small></div>
             <button v-if="record.capabilities.readTools" type="button" class="ghost" @click="toolId = tool.id">{{ label('edit') }}</button>
           </article>
-        </section>
-        <section id="group-visibility" class="form-card">
+        </template>
+      </template>
+      <template #lifecycle="{ groupId }">
+        <section v-if="groupId === 'visibility'">
           <h3>{{ label('visibility') }}</h3>
           <p class="muted">{{ label('visibilityNote') }}</p>
           <dl class="facts">
@@ -326,7 +324,7 @@ onUnmounted(() => clearTimeout(toastTimer));
               <dt>{{ label(key) }}</dt><dd><span class="pill" :class="allowed ? 'active' : 'disabled'">{{ label(allowed ? 'yes' : 'no') }}</span></dd></template>
           </dl>
         </section>
-        <section id="group-history" class="form-card">
+        <section v-if="groupId === 'history'">
           <h3>{{ label('history') }}</h3>
           <div class="segmented" role="group" :aria-label="label('history')">
             <button v-for="view in (['usage', 'audits'] as const)" :key="view" type="button" :aria-pressed="tab === view" @click="tab = view">{{ label(view) }}</button>
@@ -345,7 +343,7 @@ onUnmounted(() => clearTimeout(toastTimer));
           </template>
           <button v-else type="button" class="ghost" @click="tab = 'usage'">{{ label('usage') }}</button>
         </section>
-        <section id="group-advanced" class="form-card">
+        <section v-if="groupId === 'advanced'">
           <details class="advanced">
             <summary><h3>{{ label('advanced') }} · {{ label('technical') }}</h3></summary>
             <dl class="facts">
@@ -358,19 +356,12 @@ onUnmounted(() => clearTimeout(toastTimer));
             <DefinitionFields v-if="readonlyFields.length" :baseline="record.definition" :changes="{}" :editable-paths="[]" :readonly-fields="readonlyFields" :only="[]" :backends="[]" :providers="[]" :models="[]" busy />
           </details>
         </section>
-        <AgentPreview class="inline-preview" :id="record.definition.id" :name="draftName" :description="String(draftValue('/config/description') ?? '')" :avatar="draftValue('/config/avatar')"
-          :active="record.definition.isActive" :deleted="!!record.definition.deletedAt" :model="String(draftValue('/config/defaults/model') ?? '')" />
-      </div>
-      <AgentPreview class="side-preview" :id="record.definition.id" :name="draftName" :description="String(draftValue('/config/description') ?? '')" :avatar="draftValue('/config/avatar')"
-        :active="record.definition.isActive" :deleted="!!record.definition.deletedAt" :model="String(draftValue('/config/defaults/model') ?? '')" />
-      <div v-if="discard" class="overlay" @click.self="discard = false">
-        <section class="overlay-dialog" role="alertdialog" aria-labelledby="discard-title" aria-modal="true">
-          <h3 id="discard-title">{{ label('discard') }}</h3>
-          <p>{{ label('discardCount') }}：{{ pending }}{{ label('changesUnit') }}</p>
-          <div class="commands end"><button type="button" class="ghost" @click="discard = false">{{ label('keepEditing') }}</button>
-            <button type="button" class="ghost danger outline" @click="leave">{{ label('discardChanges') }}</button></div>
-        </section>
-      </div>
+      </template>
+      <template #overlay>
+      <DiscardDialog v-if="discard" :title="label('discard')" :keep-label="label('keepEditing')" :discard-label="label('discardChanges')"
+        :busy="editor.busy || acting" @keep="discard = false" @discard="!editor.busy && !acting && leave()">
+        <p>{{ label('discardCount') }}: {{ pending }}{{ label('changesUnit') }}</p>
+      </DiscardDialog>
       <div v-else-if="action && impact" class="overlay">
         <section class="overlay-dialog" :class="{ dangerous: action === 'delete' || action === 'disable' }" role="alertdialog" aria-labelledby="impact-title" aria-modal="true">
           <h3 id="impact-title">{{ label('impact') }} · {{ label(action) }}</h3>
@@ -384,7 +375,8 @@ onUnmounted(() => clearTimeout(toastTimer));
             <button type="button" :class="action === 'delete' ? 'solid-danger' : 'primary'" :disabled="!acknowledged || acting || (action === 'delete' && typedSlug !== record.definition.slug)" @click="confirmAction"><LoaderCircle v-if="acting" :size="16" class="spin" />{{ label(acting ? 'saving' : action) }}</button></div>
         </section>
       </div>
-    </div>
+      </template>
+    </EditorView>
     <footer v-if="editor.record">
       <button type="button" class="icon" :disabled="editor.busy || acting" :title="label('refresh')" :aria-label="label('refresh')" @click="refresh"><RefreshCw :size="16" /></button>
       <span class="muted hint">{{ editor.dirty ? label('shortcuts') : label('noChanges') }}</span>
@@ -410,15 +402,8 @@ h2 { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 1
 .unsaved-badge { font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: var(--r-full); background: #fffbeb; color: #b45309; animation: scale-in .4s var(--ease-spring) both; }
 .revision { display: inline-block; animation: scale-in .4s var(--ease-spring) both; }
 .head-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-.drawer-grid { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: 180px minmax(0, 1fr) 280px; }
-.group-nav { display: flex; flex-direction: column; gap: 2px; padding: 14px 10px; border-right: 1px solid var(--border); background: var(--bg-card); overflow: auto; }
-.group-nav button { justify-content: space-between; min-height: 40px; border: 0; border-left: 3px solid transparent; border-radius: var(--r-sm); background: transparent; padding: 8px 10px; font-size: 13px; color: var(--text-secondary); text-align: start; transition: all .25s var(--ease); }
-.group-nav button:hover { background: var(--bg-hover); color: var(--text-primary); }
-.group-nav [aria-selected=true] { border-left-color: var(--accent); background: var(--teal-50); color: var(--teal-700); font-weight: 600; }
 .dirty-dot { display: inline-block; width: 7px; height: 7px; margin-left: 6px; border-radius: 50%; background: var(--amber-500); flex-shrink: 0; animation: scale-in .4s var(--ease-spring) both; }
 .drawer-body { padding: 16px 20px 32px; overflow: auto; min-height: 0; display: grid; gap: 14px; align-content: start; scroll-behavior: smooth; }
-.side-preview { padding: 16px 14px; border-left: 1px solid var(--border); background: var(--bg-card); overflow: auto; }
-.inline-preview { display: none; }
 .form-card { scroll-margin-top: 12px; padding: 14px 16px 16px; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-card); box-shadow: var(--shadow-xs); transition: all .25s var(--ease); animation: fade-in-up .5s var(--ease-out) both; }
 .form-card:hover { border-color: var(--border-strong); }
 .form-card h3 { display: flex; align-items: center; margin: 0 0 12px; font-size: 14px; } .form-card h4 { margin: 14px 0 8px; font-size: 12.5px; color: var(--text-secondary); }
@@ -466,15 +451,10 @@ footer { display: flex; align-items: center; gap: 10px; padding: 10px 16px; bord
 .spin { animation: spin 1s linear infinite; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 pre, code { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 12px; }
-@media (max-width: 1200px) { .drawer-grid { grid-template-columns: 170px minmax(0, 1fr); } .side-preview { display: none; } .inline-preview { display: grid; } }
 @media (max-width: 600px) {
   .definition-drawer { width: 100%; border-left: 0; }
   .drawer-head { padding: 10px 12px; } .head-avatar { width: 32px; height: 32px; } h2 { font-size: 15px; }
   .head-actions .ghost { display: none; }
-  .drawer-grid { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-  .group-nav { flex-direction: row; overflow-x: auto; padding: 8px 10px; border-right: 0; border-bottom: 1px solid var(--border); scrollbar-width: none; }
-  .group-nav button { flex-shrink: 0; border-left: 0; border-radius: var(--r-full); padding: 6px 12px; min-height: 36px; border: 1px solid var(--border); white-space: nowrap; }
-  .group-nav [aria-selected=true] { border-color: var(--accent); }
   .drawer-body { padding: 12px 12px 24px; }
   .binding-options, .impact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   footer { padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); } footer .hint { display: none; } footer .primary { flex: 1; min-height: 44px; } footer { justify-content: flex-end; }

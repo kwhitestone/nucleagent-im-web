@@ -1,20 +1,43 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Plus, X, Search, Sparkles } from "@lucide/vue";
-import type { Skill } from "./api";
+import type { Skill, DefinitionApi } from "./api";
+import { useRemotePage } from "./useRemotePage";
+import CollectionPager from "./CollectionPager.vue";
 import { text, type MessageKey } from "./messages";
 
-const props = defineProps<{ skills: Skill[]; selected: number[]; editable: boolean; installPath?: (id: number) => string }>();
-const emit = defineEmits<{ toggle: [skillId: number, checked: boolean] }>();
+const props = defineProps<{ skills: Skill[]; selected: number[]; editable: boolean; installPath?: (id: number) => string; fetchPage: DefinitionApi["skillsPage"] }>();
+const emit = defineEmits<{ toggle: [skillId: number, checked: boolean]; metadata: [skills: Skill[]] }>();
 const { locale } = useI18n();
 const label = (key: MessageKey) => text(key, locale.value);
 const open = ref(false);
-const query = ref("");
+const { rows: matches, query, page, total, hasMore, loading, failed, go, load } =
+  useRemotePage<Skill>((params, signal) => props.fetchPage(params, signal));
+const selectedPage = useRemotePage<Skill>(async (params, signal) => {
+  const ids = props.selected.slice((params.page - 1) * params.pageSize, params.page * params.pageSize);
+  const result = await props.fetchPage({ ...params, page: 1, ids: ids.length ? ids : [0] }, signal);
+  // Missing or inaccessible metadata must not hide selected IDs that can still be removed.
+  return { ...result, page: params.page, total: props.selected.length,
+    hasMore: params.page * params.pageSize < props.selected.length };
+});
+const known = ref<Skill[]>([]);
+watch(matches, rows => {
+  known.value = [...new Map([...known.value, ...rows].map(row => [row.id, row])).values()]
+    .filter(row => props.selected.includes(row.id) || rows.some(item => item.id === row.id));
+  emit("metadata", known.value);
+});
+watch(() => props.selected, () => { void selectedPage.load(); }, { deep: true });
+onMounted(() => { void load(); void selectedPage.load(); });
 const search = ref<HTMLInputElement>();
-const chosen = computed(() => props.selected.map(id => props.skills.find(skill => skill.id === id)).filter((skill): skill is Skill => !!skill));
-const matches = computed(() => props.skills.filter(skill =>
-  `${skill.name}\n${skill.slug}`.toLocaleLowerCase().includes(query.value.trim().toLocaleLowerCase())));
+const chosen = computed(() => {
+  const start = (selectedPage.page.value - 1) * 20;
+  return props.selected.slice(start, start + 20).map(id =>
+    selectedPage.rows.value.find(row => row.id === id)
+    ?? props.skills.find(row => row.id === id)
+    ?? known.value.find(row => row.id === id)
+    ?? { id, name: `#${id}`, slug: "", sourceSHA256: "", isActive: false });
+});
 async function toggleList() { open.value = !open.value; if (open.value) { await nextTick(); search.value?.focus(); } }
 </script>
 
@@ -28,19 +51,23 @@ async function toggleList() { open.value = !open.value; if (open.value) { await 
         <button v-if="editable" type="button" class="chip-remove" :aria-label="`${label('removeSkill')} ${skill.name}`" :title="label('removeSkill')" @click="emit('toggle', skill.id, false)"><X :size="14" /></button>
       </li>
     </ul>
+    <CollectionPager v-if="selected.length > 20 || selectedPage.failed.value" :page="selectedPage.page.value"
+      :total="selected.length" :has-more="selectedPage.page.value * 20 < selected.length" :loading="selectedPage.loading.value"
+      :failed="selectedPage.failed.value" @page="selectedPage.go" @retry="selectedPage.load" />
     <button v-if="editable" type="button" class="add-skill" :aria-expanded="open" @click="toggleList"><Plus :size="16" />{{ label('addSkill') }}</button>
     <div v-if="open && editable" class="skill-popover" role="group" :aria-label="label('addSkill')" @keydown.esc.stop.prevent="open = false">
       <label class="skill-search"><Search :size="16" aria-hidden="true" /><input ref="search" v-model="query" type="search" :aria-label="label('searchSkills')" :placeholder="label('searchSkills')" /></label>
       <ul class="skill-options">
         <li v-for="skill in matches" :key="skill.id">
           <label class="skill-option" :class="{ off: !skill.isActive && !selected.includes(skill.id) }">
-            <input type="checkbox" :checked="selected.includes(skill.id)" :disabled="!skill.isActive && !selected.includes(skill.id)"
+            <input type="checkbox" :checked="selected.includes(skill.id)" :disabled="(!skill.isActive || selected.length >= 50) && !selected.includes(skill.id)"
               @change="emit('toggle', skill.id, ($event.target as HTMLInputElement).checked)" />
             <span><strong>{{ skill.name }}</strong><small>{{ !skill.isActive && !selected.includes(skill.id) ? label('skillDisabled') : `${skill.slug} · ${skill.version}` }}</small></span>
           </label>
         </li>
         <li v-if="!matches.length" class="skill-empty">{{ label('emptyResources') }}</li>
       </ul>
+      <CollectionPager :page="page" :total="total" :has-more="hasMore" :loading="loading" :failed="failed" @page="go" @retry="load" />
     </div>
   </div>
 </template>

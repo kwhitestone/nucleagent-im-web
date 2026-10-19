@@ -1,3 +1,4 @@
+import "@prism-fusion/editor-ui/style.css";
 import { createApp } from "vue";
 import App from "./App.vue";
 // Aurora first: style.css resolves every colour against its tokens and turns off
