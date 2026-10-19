@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue
 import { useI18n } from "vue-i18n";
 import { Settings2, Info } from "@lucide/vue";
 import AgentManagement from "./agent-definition/AgentManagement.vue";
+import AgentManagementOverlay from "./agent-definition/AgentManagementOverlay.vue";
 import AgentEffective from "./agent-definition/AgentEffective.vue";
 import { createEffectiveApi } from "./agent-definition/effective";
 import { createDefinitionApi } from "./agent-definition/api";
@@ -1595,10 +1596,6 @@ onBeforeUnmount(() => {
        own AppSidebar anatomy (brand / nav / list / user slot) split across two
        columns, so the mental model carries over between them. -->
   <!-- Phones: the open chat covers the sidebar, except while the search page (which lives there) is open. -->
-  <main v-else-if="managementOpen" class="agent-management-page">
-    <AgentManagement :key="session.uid" :api="agentDefinitions" closable
-      @close="managementOpen = false" @invalidated="refreshAgentPresentation()" />
-  </main>
   <main v-else class="app-shell" :class="{ 'show-chat': activeChannel && !searchOpen }">
     <nav class="rail" :aria-label="t('app.title')">
       <span class="rail-brand" :title="t('app.title')">N</span>
@@ -2201,6 +2198,15 @@ onBeforeUnmount(() => {
       <button type="button" class="notice-close" :aria-label="t('hide.dismiss')" @click="batch.dismiss()">×</button>
     </p>
   </main>
+  <AgentManagementOverlay v-if="session && canManageAgents && managementOpen" :key="session.uid"
+    :label="definitionText('title', getLocale())" @close="managementOpen = false">
+    <template #default="{ close }">
+      <div class="agent-management-page">
+        <AgentManagement :api="agentDefinitions" closable
+          @close="close" @invalidated="refreshAgentPresentation()" />
+      </div>
+    </template>
+  </AgentManagementOverlay>
 </template>
 
 <style scoped>
