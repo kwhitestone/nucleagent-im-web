@@ -99,7 +99,7 @@ test("creation uses catalog policy and actor-scoped idempotency, lookup never PO
   const catalog = { capabilities: { ...detail.capabilities, create: true }, fieldPolicy: detail.fieldPolicy, skills: [] };
   const calls: any[] = [];
   const api = createDefinitionApi(async (path, init) => {
-    calls.push({ path, init }); return ok(path.endsWith("/catalog") ? catalog : detail);
+    calls.push({ path, init }); return ok(path.endsWith("/catalog?includeSkills=false") ? catalog : detail);
   });
   assert.deepEqual(await api.catalog(), catalog);
   await api.create(catalog, "new-agent", { "/name": "New" }, "request_key_123456");
@@ -110,6 +110,20 @@ test("creation uses catalog policy and actor-scoped idempotency, lookup never PO
   assert.notEqual(calls.at(-1).init.method, "POST");
   await assert.rejects(api.create({ ...catalog, capabilities: { ...catalog.capabilities, create: false } }, "new", { "/name": "New" }, "request_key_123456"), /forbidden/);
   await assert.rejects(api.create(catalog, "new", { "/name": "New" }, "../invalid"), /idempotency/i);
+});
+
+test("skill selection uses paged transport, selected IDs and cancellation without catalog fallback", async () => {
+  const calls: any[] = [];
+  const controller = new AbortController();
+  const page = { code: 0, data: [], page: 2, pageSize: 20, total: 23, hasMore: false };
+  const api = createDefinitionApi(async (path, init) => {
+    calls.push({ path, init }); return { status: 200, headers: {}, body: page };
+  });
+  assert.deepEqual(await api.skillsPage({ page: 2, pageSize: 20, search: "writer", ids: [3, 8] }, controller.signal), page);
+  assert.equal(calls[0].path, "/api/v1/addons/skill?page=2&pageSize=20&search=writer&ids=3%2C8");
+  assert.equal(calls[0].init.signal, controller.signal);
+  page.pageSize = 101;
+  await assert.rejects(api.skillsPage({ page: 1, pageSize: 20, search: "" }), /Invalid skill page/);
 });
 
 test("shared tool updates carry own CAS and only policy-approved safe dirty leaves", async () => {

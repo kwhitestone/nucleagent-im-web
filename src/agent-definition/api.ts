@@ -1,4 +1,5 @@
 import { buildChanges, readPath, validateChanges, type Binding, type Changes } from "./draft.ts";
+import type { PageParams, PageResult } from "./useRemotePage.ts";
 
 export interface Definition {
   id: number; name: string; slug: string; revision: string; isActive: boolean;
@@ -158,8 +159,19 @@ export function createDefinitionApi(transport: Transport) {
     return { ...d, etag: result.etag };
   }
   return {
+    async skillsPage(params: PageParams & { ids?: number[] }, signal?: AbortSignal): Promise<PageResult<Skill>> {
+      const query = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize), search: params.search });
+      if (params.ids) query.set("ids", params.ids.join(","));
+      const response = await transport(`/api/v1/addons/skill?${query}`, { cache: "no-store", signal });
+      const body = response.body as PageResult<Skill> & { code?: number | string };
+      if (response.status !== 200 || body?.code !== 0) throw new DefinitionError(response.status, "skill_page_failed");
+      if (!Array.isArray(body.data) || !Number.isSafeInteger(body.total) || body.total < 0
+        || !Number.isSafeInteger(body.page) || body.page < 1 || !Number.isSafeInteger(body.pageSize)
+        || body.pageSize < 1 || body.pageSize > 100 || typeof body.hasMore !== "boolean") throw new Error("Invalid skill page");
+      return body;
+    },
     async catalog(): Promise<Catalog> {
-      const { data } = await request<Catalog>(`${BASE}/catalog`);
+      const { data } = await request<Catalog>(`${BASE}/catalog?includeSkills=false`);
       if (!validCapabilities(data.capabilities) || typeof data.capabilities.create !== "boolean"
         || !validPolicy(data.fieldPolicy) || !Array.isArray(data.skills)) throw new Error("Invalid catalog contract");
       return data;

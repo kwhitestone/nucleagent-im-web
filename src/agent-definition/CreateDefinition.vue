@@ -15,6 +15,7 @@ const emit = defineEmits<{ close: []; created: [detail: Detail] }>();
 const { locale } = useI18n();
 const label = (key: MessageKey) => text(key, locale.value);
 const draft = reactive(new CreationDraft(crypto.randomUUID()));
+const skillMetadata = ref<import("./api").Skill[]>([]);
 const dialog = ref<HTMLDialogElement>();
 const previousFocus = document.activeElement as HTMLElement | null;
 const discard = ref(false);
@@ -37,7 +38,7 @@ function bind(id: number, checked: boolean) {
   if (locked.value) return;
   const ids = (draft.bindings ?? []).map(b => b.skillId).filter(value => value !== id);
   if (checked) ids.push(id);
-  draft.bindings = reconcileBindings([], ids, props.catalog.skills.map(s => ({ skillId: s.id, installPath: s.defaultInstallPath ?? "" })));
+  draft.bindings = reconcileBindings(draft.bindings ?? [], ids, [...props.catalog.skills, ...skillMetadata.value].map(s => ({ skillId: s.id, installPath: s.defaultInstallPath ?? "" })));
 }
 async function submit(lookup = false) {
   const saved = await (lookup ? draft.lookup(props.api) : draft.submit(props.api, props.catalog));
@@ -84,7 +85,8 @@ onUnmounted(() => {
           :readonly-fields="[]" :backends="backends.map(b => ({ value: b.id, label: b.displayName }))"
           :providers="providerChoices" :models="modelChoices" :busy="locked" @change="change" />
         <fieldset v-if="catalog.capabilities.readSkills"><legend>{{ label('skills') }}</legend>
-          <SkillPicker :skills="catalog.skills" :selected="(draft.bindings ?? []).map(b => b.skillId)" :editable="!locked && catalog.capabilities.writeSkillBindings" @toggle="bind" />
+          <SkillPicker :skills="catalog.skills" :selected="(draft.bindings ?? []).map(b => b.skillId)" :editable="!locked && catalog.capabilities.writeSkillBindings"
+            :fetch-page="api.skillsPage" @metadata="skillMetadata = $event" @toggle="bind" />
         </fieldset>
       </template>
     </div>

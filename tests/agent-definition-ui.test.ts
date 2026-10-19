@@ -53,8 +53,8 @@ test("the drawer shows grouped navigation and keeps backend paths and hashes out
     const advanced = html.match(/<details[^>]*class="[^"]*advanced[^"]*"[^>]*>([\s\S]*?)<\/details>/)?.[1] ?? "";
     assert.match(advanced, /abcdef0123456789abcdef/, "effective hash lives in the collapsed advanced card");
     assert.equal(html.split("abcdef0123456789abcdef").length - 1, 1, "hash not shown elsewhere");
-    assert.match(html, /class="[^"]*agent-preview/);
-    assert.match(html, /does not call the model/i);
+    assert.match(html, /data-editor-view="prism"/);
+    assert.match(html, /class="editor-fields"/);
   } finally { restore(); }
 });
 
@@ -72,6 +72,43 @@ test("skills render as removable chips with a searchable add list", async () => 
     assert.match(html, /class="skill-chip"[\s\S]*Writer/);
     assert.match(html, /Add skill/);
   } finally { restore(); }
+});
+
+test("paged skill metadata supplies default paths and keeps earlier unsaved selections", async () => {
+  const { bindings, restore } = await mountDrawer({});
+  try {
+    bindings.skillMetadata.value = [{ id: 8, defaultInstallPath: "skills/reviewer" }];
+    bindings.selectSkill(8, true);
+    bindings.skillMetadata.value = [{ id: 9, defaultInstallPath: "skills/runner" }];
+    bindings.selectSkill(9, true);
+    assert.deepEqual(bindings.editor.bindings, [
+      { skillId: 3, installPath: "" }, { skillId: 8, installPath: "skills/reviewer" },
+      { skillId: 9, installPath: "skills/runner" },
+    ]);
+  } finally { restore(); }
+});
+
+test("selected skill pages keep unavailable IDs reachable and request only the visible ID page", async () => {
+  const picker = await loadComponent("src/agent-definition/SkillPicker.vue") as { setup: Function };
+  const setup = picker.setup;
+  let bindings: any;
+  const requests: any[] = [];
+  picker.setup = function (props: unknown, context: unknown) { bindings = setup(props, context); return bindings; };
+  try {
+    await render(picker, {
+      skills: [], selected: Array.from({ length: 45 }, (_, index) => index + 1), editable: true,
+      fetchPage: async (params: any) => {
+        requests.push(params);
+        return { data: [], page: params.page, pageSize: params.pageSize, total: 0, hasMore: false };
+      },
+    }, "en");
+    await bindings.selectedPage.go(3);
+    assert.equal(bindings.selectedPage.page.value, 3);
+    assert.equal(bindings.selectedPage.total.value, 45);
+    assert.deepEqual(requests[0].ids, [41, 42, 43, 44, 45]);
+    assert.equal(requests[0].page, 1);
+    assert.deepEqual(bindings.chosen.value.map((skill: any) => skill.id), [41, 42, 43, 44, 45]);
+  } finally { picker.setup = setup; }
 });
 
 test("regression: saving through the impact confirmation patches once with the etag and shows a status toast", async () => {
