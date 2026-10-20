@@ -119,6 +119,13 @@ const errorKeys: Record<string, MessageKey> = {
   agent_identity_update_failed: "identityFailed", agent_definition_active: "mustDisable",
   agent_definition_deleted: "deletedLocked", invalid_definition_patch: "invalidPatch", model_type_mismatch: "modelMismatch",
 };
+const toolReasons: Record<string, [string, string]> = {
+  held: ["同步暂停", "sync held"], source_removed: ["来源已移除", "source removed"], conflict: ["同步冲突", "sync conflict"],
+  not_admitted: ["未准入", "not admitted"], engine_tools_disabled: ["导入工具未开启", "imported tools off"], manual_disabled: ["已停用", "disabled"],
+};
+export function toolReason(reason: string, locale: string): string {
+  return toolReasons[reason]?.[locale.startsWith("zh") ? 0 : 1] ?? reason;
+}
 /** Maps a failed request to a user-facing reason; unknown failures keep the generic message. */
 export function errorKey(error: unknown): MessageKey {
   const e = error as { status?: unknown; code?: unknown } | null;

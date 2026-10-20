@@ -6,7 +6,7 @@ import { ToolBindings as BindingList } from "@prism-fusion/editor-ui";
 import { useRemotePage } from "./useRemotePage";
 import type { DefinitionApi, ToolOption } from "./api";
 import CollectionPager from "./CollectionPager.vue";
-import { text } from "./messages";
+import { text, toolReason } from "./messages";
 
 const props = defineProps<{
   selected: number[]; skillIds: number[]; editable: boolean; manageable: boolean;
@@ -14,6 +14,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ toggle: [id: number, checked: boolean]; edit: [id: number] }>();
 const { locale } = useI18n();
+const reasonText = (reason: string) => toolReason(reason, locale.value);
 const selectedOnly = ref(false);
 const metadata = shallowRef<ToolOption[]>([]);
 const hydrated = ref(false);
@@ -38,8 +39,11 @@ async function hydrate() {
 }
 const visible = computed(() => rows.value.map(row => {
   const translation = row.i18n?.[locale.value] as { name?: unknown } | undefined;
-  return { id: row.id, name: typeof translation?.name === "string" ? translation.name : row.name,
-    missing: false, covered: !!row.skillIds?.some(id => props.skillIds.includes(id)) };
+  const name = typeof translation?.name === "string" ? translation.name : row.name;
+  // Held/conflict/... rows render as missing: not tickable, an existing pick can still be unticked.
+  const off = row.status !== undefined && row.status !== "ready";
+  return { id: row.id, name: off && row.reason ? `${name} · ${reasonText(row.reason)}` : name,
+    missing: off, covered: !!row.skillIds?.some(id => props.skillIds.includes(id)) };
 }));
 const unavailable = computed(() => hydrated.value
   ? props.selected.filter(id => !metadata.value.some(row => row.id === id)) : []);

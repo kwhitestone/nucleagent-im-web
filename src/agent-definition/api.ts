@@ -33,6 +33,8 @@ export interface Tool {
 export interface ToolDetail { tool: Tool; capabilities: { read: boolean; write: boolean }; fieldPolicy: FieldPolicy; etag: string }
 export interface ToolOption {
   id: number; name: string; skillIds?: number[]; i18n?: Record<string, unknown>;
+  /** Catalog v2: anything but "ready" is listed for visibility only; absent (older core) = ready. */
+  status?: string; reason?: string;
 }
 export interface Detail {
   definition: Definition; capabilities: Capabilities; fieldPolicy: FieldPolicy;
@@ -176,7 +178,8 @@ export function createDefinitionApi(transport: Transport) {
       if (!Array.isArray(body.data) || !Number.isSafeInteger(body.total) || body.total < 0
         || body.page !== params.page || body.pageSize !== params.pageSize || typeof body.hasMore !== "boolean"
         || body.data.length > params.pageSize || !body.data.every(row => row && Number.isSafeInteger(row.id) && row.id > 0
-          && typeof row.name === "string" && (row.skillIds === undefined
+          && typeof row.name === "string" && (row.status === undefined || typeof row.status === "string")
+          && (row.reason === undefined || typeof row.reason === "string") && (row.skillIds === undefined
             || (Array.isArray(row.skillIds) && row.skillIds.every(id => Number.isSafeInteger(id) && id > 0))))) {
         throw new Error("Invalid tool page");
       }

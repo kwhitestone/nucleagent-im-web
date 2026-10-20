@@ -1,5 +1,6 @@
 import { DefinitionError, type DefinitionApi, type Detail, type Impact } from "./api.ts";
 import { buildChanges, newerRevision, rebaseChanges, type Binding, type Changes } from "./draft.ts";
+import { errorKey } from "./messages.ts";
 
 const bindingKey = (bindings: Binding[]) => JSON.stringify([...bindings].sort((a, b) => a.skillId - b.skillId));
 const toolKey = (ids: number[] = []) => JSON.stringify([...ids].sort((a, b) => a - b));
@@ -134,7 +135,7 @@ export class DefinitionEditor {
         }
       } else {
         this.verificationRequired = !(error instanceof DefinitionError) || error.status >= 500;
-        this.error = this.verificationRequired ? "uncertain" : "error";
+        this.error = this.verificationRequired ? "uncertain" : errorKey(error);
       }
       return null;
     } finally {
