@@ -129,3 +129,23 @@ test("standalone installs nothing", (t) => {
   t.after(() => { (globalThis as any).window = original; });
   installEmbedHost({ onInit: assert.fail, onCredential: assert.fail, onRevoke: assert.fail }, host)();
 });
+
+test("a revoke (or a new init) during an in-flight exchange discards its result and revokes it server-side", async (t) => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const { frame, calls, events } = harness(t, host, () => new Response(JSON.stringify({ accessToken: "late-jwt" })));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init: RequestInit) => {
+    if (String(url).endsWith("/portal/credential")) await gate;
+    return originalFetch(url, init);
+  }) as typeof fetch;
+  frame.deliver("agentia:embed-init", { conversationId: "c1" });
+  frame.deliver("agentia:embed-credential", { conversationId: "c1", ucToken });
+  frame.deliver("agentia:embed-revoke", { conversationId: "c1" });
+  release();
+  await tick(); await tick();
+  assert.deepEqual(events, ["init", "revoke"]);
+  assert.equal(frame.sent.at(-1)?.message.payload.status, "rejected");
+  const late = calls.filter((call) => call.url.endsWith("/logout")).map((call) => (call.init.headers as Record<string, string>).Authorization);
+  assert.ok(late.includes("late-jwt"), "the discarded session must be revoked too");
+});
