@@ -31,6 +31,30 @@ test("host:init during config load is kept without payload and replayed after mo
   assert.doesNotMatch(JSON.stringify(delivered[0].data), /do-not-buffer/);
 });
 
+test("agentia:embed-init during config load is kept without extra fields and replayed after mount", async t => {
+  const target = new EventTarget() as Window;
+  const parent = new MessageChannel().port1;
+  t.after(() => parent.close());
+  Object.defineProperty(target, "parent", { value: parent });
+  let release!: () => void;
+  const config = new Promise<void>(resolve => { release = resolve; });
+  const delivered: MessageEvent[] = [];
+  const send = (data: object, source: unknown = parent) => target.dispatchEvent(new MessageEvent("message", {
+    data, source: source as MessagePort, origin: "https://agentia.example.test",
+  }));
+  const pending = startRuntimeApp(() => config, async () => {
+    target.addEventListener("message", event => delivered.push(event as MessageEvent));
+  }, target);
+  send({ type: "agentia:embed-credential", payload: { conversationId: "c1", ucToken: "do-not-buffer" } });
+  send({ type: "agentia:embed-init", payload: { conversationId: "x".repeat(201) } });
+  send({ type: "agentia:embed-init", payload: { conversationId: "c1", ucToken: "do-not-buffer" } });
+  release();
+  await pending;
+  assert.equal(delivered.length, 1);
+  assert.deepEqual(delivered[0].data, { type: "agentia:embed-init", payload: { conversationId: "c1" } });
+  assert.equal(delivered[0].origin, "https://agentia.example.test");
+});
+
 test("failed config never mounts, replays or retains a listener", async () => {
   let added = 0, removed = 0, mounted = 0, dispatched = 0;
   const target = {

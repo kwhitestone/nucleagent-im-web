@@ -7,6 +7,7 @@ export function runtimeFixture(zone = "dev.ndaeweb.com") {
     VITE_SHELL_URL: `https://nucleagent-web.${zone}`,
     VITE_SHELL_ALLOWED_ORIGINS: "",
     VITE_ACCOUNT_UI_URL: `https://nucleagent-web.${zone}/remote/account-ui.js`,
+    VITE_EMBED_HOST_ORIGINS: "",
   };
 }
 export const ZONES = ["dev.ndaeweb.com", "debug.ndaeweb.com", "beta.ndaeweb.com", "sdp.ndaeweb.com"];

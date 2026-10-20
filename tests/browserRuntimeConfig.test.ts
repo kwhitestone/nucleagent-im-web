@@ -70,6 +70,19 @@ test("optional values keep their existing meaning", () => {
   assert.equal(parseRuntimeConfig({ ...config, VITE_ACCOUNT_UI_URL: "" }, pageOf()).VITE_ACCOUNT_UI_URL, "");
 });
 
+test("the embed host list is optional, exact-origin only, and follows the outer twin", () => {
+  const { VITE_EMBED_HOST_ORIGINS: _omit, ...config } = runtimeFixture();
+  assert.equal(parseRuntimeConfig(config, pageOf()).VITE_EMBED_HOST_ORIGINS, "");
+  const list = "https://agentia.new.ndhy.com,https://agentia.sdp.ndaeweb.com";
+  assert.equal(parseRuntimeConfig({ ...config, VITE_EMBED_HOST_ORIGINS: list }, pageOf()).VITE_EMBED_HOST_ORIGINS, list);
+  const outer = parseRuntimeConfig({ ...runtimeFixture("sdp.ndaeweb.com"), VITE_EMBED_HOST_ORIGINS: list },
+    "https://nucleagent-im-web.new.ndhy.com");
+  assert.equal(outer.VITE_EMBED_HOST_ORIGINS, "https://agentia.new.ndhy.com,https://agentia.new.ndhy.com");
+  for (const value of ["*", "null", "https://agentia.new.ndhy.com/", "https://agentia.new.ndhy.com,", 1]) {
+    assert.throws(() => parseRuntimeConfig({ ...config, VITE_EMBED_HOST_ORIGINS: value }, pageOf()));
+  }
+});
+
 test("fetch is same-origin, uncached, credential-free and fails closed", async () => {
   const config = runtimeFixture();
   let seen: [string, RequestInit | undefined] | undefined;
