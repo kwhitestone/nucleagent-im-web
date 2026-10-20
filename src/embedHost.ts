@@ -100,6 +100,9 @@ export function installEmbedHost(
   if (!allowed.size) return () => undefined;
 
   let embedded: string | null = null;
+  // Bumped by every init and revoke: an exchange that resolves after either belongs to
+  // a session the host already replaced or ended, so its JWT is revoked, never adopted.
+  let epoch = 0;
   const reply = (origin: string, type: string, payload: Record<string, unknown>) =>
     window.parent.postMessage({ type, payload }, origin);
 
@@ -108,6 +111,7 @@ export function installEmbedHost(
     const message = embedHostMessage(event.data);
     if (!message) return;
     if (message.kind === "init") {
+      epoch += 1;
       embedded = message.conversationId;
       options.onInit();
       reply(event.origin, "nucleagent:ready", { conversationId: embedded });
@@ -116,13 +120,20 @@ export function installEmbedHost(
     if (message.conversationId !== embedded) return;
     if (message.kind === "credential") {
       const id = message.conversationId;
+      const started = epoch;
       void exchange(message.ucToken).then((accessToken) => {
-        options.onCredential(accessToken);
+        if (accessToken && started !== epoch) {
+          revokeServerSession(accessToken);
+          accessToken = null;
+        } else {
+          options.onCredential(accessToken);
+        }
         reply(event.origin, "nucleagent:credential-ack", { conversationId: id, status: accessToken ? "ok" : "rejected" });
       });
       return;
     }
     // Both sides: clearing only the client would leave the JWT and refresh family usable.
+    epoch += 1;
     revokeServerSession(options.onRevoke());
   };
 
