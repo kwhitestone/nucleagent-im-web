@@ -1,5 +1,5 @@
 {
-  "sourceCommit": "134e17aa40036f83818ef9b46142ce62f944998f",
+  "sourceCommit": "1f36a5cd24b88c523b746cd2c27ba2c76ae07539",
   "coreSource": "21d2c188c1623682b008bc1b360fb01afa36079f",
   "builder": {
     "node": "v24.14.0",
@@ -14,13 +14,13 @@
     "dist/EditorLayout.vue.d.ts": "628bd487a95d49c497a23563c227e9fc5fe762270ec5a0818eedf18462c0fad3",
     "dist/EditorView.vue.d.ts": "334caf6fd0d3445e1b47e3597a86c05a9fd048c282aaf55f9854917bf5392ee7",
     "dist/ToolBindings.vue.d.ts": "34c1beef9a23e27d7e98089980924b2a36115c795e072b4b81e3b02b67366273",
-    "dist/editor.css": "9118a53bd9aa60af04f17c3de58fd57ee281667baf379a7c36408f5fd0460542",
-    "dist/editor.js": "27008f5e6a001a7f16b0f049fb590e7f0b791880bce101a8d50dd4e30f502cfb",
+    "dist/editor.css": "19374a875068586f21b6b90e7ab6835eadc5933cf1b0db3753a596ed6142fbf6",
+    "dist/editor.js": "56aec1f995b50b210294e8a456c50cd86495b34d1b0b9a75880f6af9859c9a8e",
     "dist/index.d.ts": "1968679dcd1c7a7e55052aafa035ced8876643045800158ccc0fbf4dd3c97e8b"
   },
   "name": "@prism-fusion/editor-ui",
   "version": "0.1.0",
-  "filename": "editor-ui-439b537f00abc82a867d816a2e58353c8e38bd3fd4e27b457cf8bf2238a94d69.tgz",
-  "sha256": "439b537f00abc82a867d816a2e58353c8e38bd3fd4e27b457cf8bf2238a94d69",
-  "integrity": "sha512-KyIP+Ssw/D4Qz3vtrfdYg8BUW9OtidxirXCTb6uFqtCj0D57bawM1TIvx6gUQkqRQP8WGo3M02q+jzKUa5VVzA=="
+  "filename": "editor-ui-8fe4a2071ada3daaaf5f73bf183e94dc34680cbd5e3a638c247797f4169ccbcd.tgz",
+  "sha256": "8fe4a2071ada3daaaf5f73bf183e94dc34680cbd5e3a638c247797f4169ccbcd",
+  "integrity": "sha512-GMh9Ax+UXXgW1Opd7Ay8QVTKCIP5smS9MRvTqzqALtB2zEEGdW9q/ktktlFq6Z8kjViuLo7NVLIDvZ8L2dWPlQ=="
 }
