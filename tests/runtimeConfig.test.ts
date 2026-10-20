@@ -120,6 +120,7 @@ test("missing or unsafe browser config fails the container start without echoing
     ["VITE_ACCOUNT_UI_URL", "https://web.example.test"], ["VITE_ACCOUNT_UI_URL", "https://web.example.test/a.js?t=secret-canary"],
     ["VITE_ACCOUNT_UI_URL", 'https://web.example.test/a".js'], ["VITE_ACCOUNT_UI_URL", "javascript:alert(1)/x"],
     ["VITE_SHELL_ALLOWED_ORIGINS", "https://a.test,"], ["VITE_SHELL_ALLOWED_ORIGINS", "*"],
+    ["VITE_EMBED_HOST_ORIGINS", "https://a.test,"], ["VITE_EMBED_HOST_ORIGINS", "*"],
   ]) {
     const result = render({ [key]: value });
     assert.notEqual(result.status, 0, `${key}=${value}`);
@@ -127,6 +128,11 @@ test("missing or unsafe browser config fails the container start without echoing
   }
   assert.equal(render({ VITE_ACCOUNT_UI_URL: "" }).status, 0);
   assert.equal(render({ VITE_SHELL_ALLOWED_ORIGINS: "" }).status, 0);
+  assert.equal(render({ VITE_EMBED_HOST_ORIGINS: "" }).status, 0);
+  const hosts = "https://agentia.debug.ndaeweb.com,https://agentia.sdp.ndaeweb.com";
+  const result = render({ VITE_EMBED_HOST_ORIGINS: hosts });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.json).VITE_EMBED_HOST_ORIGINS, hosts);
 });
 
 test("the image takes no build-time endpoints and keeps the template out of auto-render", () => {

@@ -59,6 +59,7 @@ import {
   startPortalLogin,
 } from "./portal";
 import { installShellBridge, isInShell, shellAccountUrl } from "./shell";
+import { installEmbedHost, revokeServerSession } from "./embedHost";
 import { resolveConversationTarget, type ConversationTarget } from "./conversationTarget";
 import {
   clearCachedProfile,
@@ -96,6 +97,11 @@ import {
 // Framed by the nucleagent-web shell: the shell owns login/logout and pushes the
 // access token. Standalone (the default) keeps every existing behaviour.
 const embedded = isInShell();
+// Framed by an agentia host instead (embedHost.ts): decided only by an origin-checked
+// embed-init, never by a URL flag. That host hands over a portal credential once; im-web
+// then owns its session like standalone (refresh cookie on its own, same-site origin).
+const agentiaHosted = ref(false);
+const shellOwnsSession = () => embedded && !agentiaHosted.value;
 const { t } = useI18n();
 const username = ref("");
 const password = ref("");
@@ -932,6 +938,35 @@ function signInViaShell(): void {
 }
 if (embedded) signInViaShell();
 
+const disposeEmbedHost = installEmbedHost({
+  onInit() {
+    agentiaHosted.value = true;
+    clearTimeout(shellLoginTimer);
+    loginError.value = "";
+    if (!session.value) loggingIn.value = true;
+  },
+  onCredential(accessToken) {
+    shellAuthGeneration += 1;
+    if (accessToken) {
+      void adoptShellSession(accessToken);
+      return;
+    }
+    loggingIn.value = false;
+    loginError.value = t("login.errFailed");
+  },
+  onRevoke() {
+    shellAuthGeneration += 1;
+    loggingIn.value = false;
+    const jwt = session.value?.jwt;
+    if (session.value) {
+      clearCachedContacts(session.value.uid);
+      clearCachedProfile(session.value.uid);
+      teardownSession();
+    }
+    return jwt;
+  },
+});
+
 async function adoptShellSession(accessToken: string): Promise<void> {
   const generation = shellAuthGeneration;
   if (session.value?.jwt === accessToken) return;
@@ -1118,7 +1153,7 @@ function startAgentStream(channel: Channel, generation: number): void {
       // Embedded, the refresh cookie lives on the shell's origin, not ours.
       // Report the rejection instead; the shell rotates and re-pushes an auth
       // intent, which lands in adoptShellSession and rebuilds the session.
-      if (embedded) {
+      if (shellOwnsSession()) {
         shellBridge.reportAuthRequired("rejected");
         throw new Error("Shell owns the session refresh");
       }
@@ -1501,6 +1536,11 @@ function teardownSession(): void {
 // null-token auth intent that tears this child down through onAuth.
 // Standalone, both land on the shell's /account, which owns sign-out there.
 function openAccount(): void {
+  if (agentiaHosted.value) {
+    // Never navigate the host's frame away; the account page opens beside it.
+    window.open(shellAccountUrl(), "_blank", "noopener");
+    return;
+  }
   if (embedded) {
     shellBridge.requestAccount();
     return;
@@ -1509,6 +1549,17 @@ function openAccount(): void {
 }
 
 function signOut(): void {
+  if (agentiaHosted.value) {
+    // No shell to delegate to: end this session here, as the host's revoke would.
+    const jwt = session.value?.jwt;
+    if (session.value) {
+      clearCachedContacts(session.value.uid);
+      clearCachedProfile(session.value.uid);
+      teardownSession();
+    }
+    revokeServerSession(jwt);
+    return;
+  }
   if (embedded) {
     shellBridge.requestLogout();
     return;
@@ -1521,6 +1572,7 @@ function signOut(): void {
 onBeforeUnmount(() => {
   clearTimeout(shellLoginTimer);
   shellBridge.dispose();
+  disposeEmbedHost();
   document.removeEventListener("keydown", onKeydown);
   document.removeEventListener("visibilitychange", onVisible);
   window.removeEventListener("focus", rereadAgentDirectory);
@@ -1541,7 +1593,8 @@ onBeforeUnmount(() => {
         <p class="eyebrow">{{ t("app.title") }}</p>
         <h1>{{ loggingIn ? t("conn.connecting") : t("login.redirectingTitle") }}</h1>
       </div>
-      <p v-if="!loggingIn">{{ t("login.redirectingBody") }}</p>
+      <p v-if="loginError" role="alert">{{ loginError }}</p>
+      <p v-else-if="!loggingIn">{{ t("login.redirectingBody") }}</p>
       <p class="typing" aria-hidden="true"><i /><i /><i /></p>
     </div>
   </main>

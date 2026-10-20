@@ -25,3 +25,14 @@ test("embedded runs never start a portal login from inside the frame", () => {
   assert.doesNotMatch(portal, /requestLogin/);
   assert.match(app, /if \(embedded\) signInViaShell\(\);/);
 });
+
+test("an agentia host is recognised only through the origin-checked handshake, never a URL flag", () => {
+  assert.match(app, /const agentiaHosted = ref\(false\);/);
+  assert.match(app, /onInit\(\) \{\s*agentiaHosted\.value = true;/);
+  assert.doesNotMatch(app, /searchParams\.get\(["']embed/);
+  // Hosted by agentia, im-web owns its refresh cookie; only the nucleagent shell owns refresh.
+  assert.match(app, /if \(shellOwnsSession\(\)\) \{\s*shellBridge\.reportAuthRequired\("rejected"\);/);
+  // Sign-out with no shell to delegate to revokes here instead of asking a shell that is not there.
+  const signOut = app.slice(app.indexOf("function signOut"), app.indexOf("// Unmount is app teardown"));
+  assert.match(signOut, /if \(agentiaHosted\.value\) \{[\s\S]*teardownSession\(\);[\s\S]*revokeServerSession\(jwt\);/);
+});

@@ -10,6 +10,7 @@ export const RUNTIME_CONFIG_KEYS = [
   "VITE_SHELL_URL",
   "VITE_SHELL_ALLOWED_ORIGINS",
   "VITE_ACCOUNT_UI_URL",
+  "VITE_EMBED_HOST_ORIGINS",
 ] as const;
 export type RuntimeConfigKey = (typeof RUNTIME_CONFIG_KEYS)[number];
 export type RuntimeConfig = Readonly<Record<RuntimeConfigKey, string>>;
@@ -53,8 +54,9 @@ export function parseRuntimeConfig(body: unknown, pageOrigin: string): RuntimeCo
   const out = {} as Record<RuntimeConfigKey, string>;
   for (const key of RUNTIME_CONFIG_KEYS) {
     const value = input[key];
-    if (key === "VITE_SHELL_ALLOWED_ORIGINS") {
-      // Optional, as before: empty keeps VITE_SHELL_URL as the single trusted shell.
+    if (key === "VITE_SHELL_ALLOWED_ORIGINS" || key === "VITE_EMBED_HOST_ORIGINS") {
+      // Optional exact-origin lists. Empty shell list keeps VITE_SHELL_URL as the single
+      // trusted shell; empty embed list turns the agentia host handshake off (embedHost.ts).
       const list = value === undefined ? "" : value;
       const invalid = () => new Error(`runtime-config.json: invalid ${key}`);
       if (typeof list !== "string") throw invalid();

@@ -59,15 +59,16 @@ done
 # Browser endpoints (public, non-secret). Only these keys are serialized; the
 # environment is never enumerated. Validation restricts every value to
 # [A-Za-z0-9.:/_-], so no JSON escaping is needed. Missing values fail closed.
-runtime_keys='VITE_AUTH_BASE VITE_IM_BASE VITE_CORE_BASE VITE_SHELL_URL VITE_SHELL_ALLOWED_ORIGINS VITE_ACCOUNT_UI_URL'
+runtime_keys='VITE_AUTH_BASE VITE_IM_BASE VITE_CORE_BASE VITE_SHELL_URL VITE_SHELL_ALLOWED_ORIGINS VITE_ACCOUNT_UI_URL VITE_EMBED_HOST_ORIGINS'
 json='{'
 separator=
 for var in $runtime_keys; do
     eval "value=\${$var-}"
     eval "present=\${$var+x}"
     case "$var" in
-        VITE_SHELL_ALLOWED_ORIGINS)
-            # Optional; empty keeps VITE_SHELL_URL as the single trusted shell.
+        VITE_SHELL_ALLOWED_ORIGINS|VITE_EMBED_HOST_ORIGINS)
+            # Optional; empty keeps VITE_SHELL_URL as the single trusted shell,
+            # or leaves the agentia embed-host handshake off.
             remaining=$value
             while [ -n "$remaining" ]; do
                 item=${remaining%%,*}
