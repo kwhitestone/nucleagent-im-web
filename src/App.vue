@@ -706,10 +706,12 @@ function upsertConversation(conversation: Conversation): void {
 // auth-fail. Re-mint once (the mint re-registers the token) and reconnect; a second
 // failure before any success stays on authFailed instead of looping.
 const remint = remintGuard();
+let authRecoveryNeeded = false;
 
 const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
   if (status === ConnectStatus.Connected) {
     connection.value = "connected";
+    authRecoveryNeeded = false;
     remint.reset();
     void Promise.all([syncConversations(), syncGroups(), refreshActiveHistory(), batch.refreshHidden()]);
     void openPendingConversation();
@@ -719,6 +721,7 @@ const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
     connection.value = "connecting";
   } else if (status === ConnectStatus.ConnectFail && reasonCode === 2) {
     connection.value = "authFailed";
+    authRecoveryNeeded = true;
     if (remint.take()) void remintConnectToken();
   } else {
     connection.value = "disconnected";
@@ -976,6 +979,8 @@ async function adoptShellSession(accessToken: string): Promise<void> {
   // If WuKongIM ever rejects that token, remintConnectToken mints from this fresh session.jwt.
   if (session.value && renewsSameUser(session.value, accessToken)) {
     session.value = { ...session.value, jwt: accessToken };
+    // An earlier remint may have failed with the expired shell credential.
+    if (authRecoveryNeeded) await remintConnectToken();
     return;
   }
   pendingConversationTarget = null;
@@ -1084,7 +1089,7 @@ async function remintConnectToken(): Promise<void> {
     connection.value = "connecting";
     sdk.connect();
   } catch {
-    // The access token itself is stale: leave authFailed; the shell/refresh path recovers it.
+    // Keep recovery pending even if socket close has changed the displayed status.
   }
 }
 
@@ -1500,6 +1505,8 @@ async function groupChanged(): Promise<void> {
 }
 
 function teardownSession(): void {
+  authRecoveryNeeded = false;
+  remint.reset();
   viewGeneration += 1;
   streamAbort?.abort();
   removeListeners();
