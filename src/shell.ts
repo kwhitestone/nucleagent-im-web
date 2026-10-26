@@ -26,6 +26,8 @@ export interface ShellAuthIntent {
    * the version this child holds is a revalidation, anything else is a sign-out.
    */
   revalidating?: true;
+  /** A duplicate delivery of the revalidation already in progress: ignore it. */
+  repeat?: true;
 }
 
 /**
@@ -46,7 +48,11 @@ export function isInShell(): boolean {
  * testable without a DOM: a forged source, an out-of-order version, or an
  * oversized token must all fail closed.
  */
-export function parseShellAuth(payload: unknown, lastVersion: number): ShellAuthIntent | null {
+export function parseShellAuth(
+  payload: unknown,
+  lastVersion: number,
+  revalidatedFrom: number | null = null,
+): ShellAuthIntent | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const value = payload as {
     source?: unknown;
@@ -71,10 +77,17 @@ export function parseShellAuth(payload: unknown, lastVersion: number): ShellAuth
     return null;
   }
   if (typeof token !== "string" && value.revalidation && typeof value.revalidation === "object" &&
-    !Array.isArray(value.revalidation) &&
-    (value.revalidation as { previousVersion?: unknown }).previousVersion === lastVersion &&
-    lastVersion > 0 && version > lastVersion) {
-    return { token: null, sessionVersion: version, revalidating: true };
+    !Array.isArray(value.revalidation)) {
+    const previous = (value.revalidation as { previousVersion?: unknown }).previousVersion;
+    if (previous === lastVersion && lastVersion > 0 && version > lastVersion) {
+      return { token: null, sessionVersion: version, revalidating: true };
+    }
+    // The shell delivers each intent more than once (observed: every auth message
+    // arrives twice). A repeat of the revalidation already in progress is that same
+    // revalidation, not a sign-out; it cannot extend or change anything.
+    if (revalidatedFrom !== null && previous === revalidatedFrom && version === lastVersion) {
+      return { token: null, sessionVersion: version, revalidating: true, repeat: true };
+    }
   }
   return { token: typeof token === "string" ? token : null, sessionVersion: version };
 }
@@ -130,6 +143,8 @@ export function installShellBridge(options: ShellBridgeOptions): ShellBridge {
 
   let lastVersion = 0;
   let authenticated = false;
+  // The version a revalidation in progress started from (null when none).
+  let revalidatedFrom: number | null = null;
   const channel = createRemoteChildChannel({
     appId: "im",
     hostOrigin: new URL(shellOrigin).origin,
@@ -148,8 +163,10 @@ export function installShellBridge(options: ShellBridgeOptions): ShellBridge {
         return;
       }
       if (type !== "auth") return;
-      const intent = parseShellAuth(payload, lastVersion);
+      const intent = parseShellAuth(payload, lastVersion, revalidatedFrom);
       if (!intent) return;
+      if (intent.repeat) return; // duplicate delivery of the revalidation in progress
+      revalidatedFrom = intent.revalidating ? lastVersion : null;
       lastVersion = intent.sessionVersion;
       authenticated = intent.token !== null;
       options.onAuth(intent);

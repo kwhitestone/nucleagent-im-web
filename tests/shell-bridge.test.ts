@@ -222,3 +222,48 @@ test("conversation targets require the authenticated session and validated chann
     bridge.dispose();
   });
 });
+
+// MUYU-161: real DEV trace (2026-10-27 03:19:16) of a same-origin second tab renewing:
+// the shell delivered every auth intent twice — revalidation 2143→2144 ×2, then the proven
+// token at 2144 ×2. The duplicate revalidation used to fall through as a null-token sign-out
+// and tore the IM view down (draft, channel, history).
+test("a duplicated revalidation delivery is not a sign-out; the proven token resumes", () => {
+  withFramedWindow((frame) => {
+    const received: Array<{ token: string | null; sessionVersion: number; revalidating?: true }> = [];
+    installShellBridge({ onAuth: (intent) => received.push(intent) });
+    const send = (payload: unknown) => frame.deliver({ source: frame.parent, origin: shellOrigin, data: hostEnvelope("auth", payload) });
+    frame.deliver({ source: frame.parent, origin: shellOrigin, data: hostEnvelope("host:init", undefined) });
+    send(authPayload({ sessionVersion: 2143 }));
+    const reval = { source: "shell", type: "auth", token: null, sessionVersion: 2144, principal: null, permissions: [], revalidation: { previousVersion: 2143 } };
+    send(reval);
+    send(reval);
+    send(authPayload({ sessionVersion: 2144, token: "proven" }));
+    send(authPayload({ sessionVersion: 2144, token: "proven" }));
+    assert.deepEqual(received.map((x) => [x.token, x.sessionVersion, !!x.revalidating]), [
+      [token, 2143, false],
+      [null, 2144, true],
+      ["proven", 2144, false],
+      ["proven", 2144, false],
+    ]);
+  });
+});
+
+test("after a revalidation resolves, a stale revalidation replay or a real sign-out still signs out", () => {
+  withFramedWindow((frame) => {
+    const received: Array<{ token: string | null; revalidating?: true }> = [];
+    installShellBridge({ onAuth: (intent) => received.push(intent) });
+    const send = (payload: unknown) => frame.deliver({ source: frame.parent, origin: shellOrigin, data: hostEnvelope("auth", payload) });
+    frame.deliver({ source: frame.parent, origin: shellOrigin, data: hostEnvelope("host:init", undefined) });
+    send(authPayload({ sessionVersion: 5 }));
+    const reval = { source: "shell", type: "auth", token: null, sessionVersion: 6, revalidation: { previousVersion: 5 } };
+    send(reval);
+    send(authPayload({ sessionVersion: 6, token: "proven" }));
+    // The revalidation is over: replaying it now is not a repeat of anything in progress.
+    send(reval);
+    assert.deepEqual(received.map((x) => [x.token, !!x.revalidating]), [[token, false], [null, true], ["proven", false], [null, false]]);
+    // A revalidation that does not start from the held version stays a sign-out.
+    send(authPayload({ sessionVersion: 7 }));
+    send({ source: "shell", type: "auth", token: null, sessionVersion: 8, revalidation: { previousVersion: 3 } });
+    assert.deepEqual(received.at(-1), { token: null, sessionVersion: 8 });
+  });
+});

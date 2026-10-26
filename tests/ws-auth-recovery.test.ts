@@ -218,3 +218,16 @@ test("revalidation resume whose re-mint fails retries on the next same-user rene
   await retry;
   assert.ok(f.calls.includes("connect"));
 });
+
+test("revalidation resume survives the shell's duplicate token delivery during the re-mint", async () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  const resume = f.adopt(jwt(2));
+  f.run("shellAuthGeneration += 1"); // duplicate delivery of the same proven token
+  await f.adopt(jwt(2));
+  f.pending[0].resolve(envelope(jwt(2)));
+  await resume;
+  assert.equal(f.pending.length, 1, "the duplicate must not mint again");
+  assert.deepEqual(f.calls, [`mint:${jwt(2)}`, "disconnect", "connect", "stream:kept-channel"]);
+  assert.equal(f.context.draft.value, "unsent draft");
+});

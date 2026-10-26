@@ -1013,8 +1013,12 @@ async function adoptShellSession(accessToken: string): Promise<void> {
     // Mark a resume as pending recovery so a failed re-mint retries on the next
     // renewal instead of leaving the view stuck (Connected clears it).
     if (resuming) authRecoveryNeeded = true;
+    const resumedUid = session.value.uid;
     if (authRecoveryNeeded) await remintConnectToken();
-    if (resuming && generation === shellAuthGeneration && session.value && activeChannel.value) {
+    // The shell delivers each intent twice, so the generation may have moved on by a
+    // duplicate of this same token; what matters is that it is still this user's
+    // session and no newer revalidation or sign-out has started.
+    if (resuming && session.value?.uid === resumedUid && !revalidationPending && activeChannel.value) {
       startAgentStream(activeChannel.value, viewGeneration);
     }
     return;
