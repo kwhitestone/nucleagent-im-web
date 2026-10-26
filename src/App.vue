@@ -421,6 +421,7 @@ document.addEventListener("keydown", onKeydown);
 document.addEventListener("visibilitychange", onVisible);
 window.addEventListener("focus", rereadAgentDirectory);
 window.addEventListener("online", rereadAgentDirectory);
+window.addEventListener("online", remintWhenOnline);
 
 /** UIDs of every agent this account has seen, so the rail can filter by them. */
 const knownAgentUids = computed(
@@ -712,6 +713,17 @@ let authRecoveryNeeded = false;
 const SHELL_REVALIDATION_MS = 12_000;
 let revalidationTimer: ReturnType<typeof setTimeout> | undefined;
 let revalidationPending = false;
+// A re-mint that failed in transport (offline) is retried: by then the SDK socket is
+// closed with reconnect off, so nothing else would bring the connection back.
+const REMINT_RETRY_MS = [2_000, 5_000, 10_000, 30_000];
+let remintRetries = 0;
+let remintRetryTimer: ReturnType<typeof setTimeout> | undefined;
+function remintWhenOnline(): void {
+  if (authRecoveryNeeded && session.value) {
+    remintRetries = 0;
+    void remintConnectToken();
+  }
+}
 
 const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
   if (status === ConnectStatus.Connected) {
@@ -1120,16 +1132,26 @@ function markChannelRead(channel: Channel): void {
 async function remintConnectToken(): Promise<void> {
   const current = session.value;
   if (!current) return;
+  clearTimeout(remintRetryTimer);
   try {
     const next = await imSession({ accessToken: current.jwt });
     if (session.value !== current) return;
+    remintRetries = 0;
     session.value = next;
     WKSDK.shared().disconnect(); // close the refused socket before the SDK opens a new one
     const sdk = configureSDK(next, () => session.value);
     connection.value = "connecting";
     sdk.connect();
-  } catch {
+  } catch (error) {
     // Keep recovery pending even if socket close has changed the displayed status.
+    // A transport failure (offline, blip: fetch rejects with TypeError) is retried with
+    // backoff and on `online`; a server refusal is not — the next renewal retries that.
+    if ((error as Error | undefined)?.name === "TypeError" && session.value === current && authRecoveryNeeded) {
+      const delay = REMINT_RETRY_MS[Math.min(remintRetries++, REMINT_RETRY_MS.length - 1)];
+      remintRetryTimer = setTimeout(() => {
+        if (session.value === current && authRecoveryNeeded) void remintConnectToken();
+      }, delay);
+    }
   }
 }
 
@@ -1203,6 +1225,12 @@ function startAgentStream(channel: Channel, generation: number): void {
     channelType: channel.channelType,
     jwt: streamJwt,
     signal: streamAbort.signal,
+    // Embedded: the shell's newest push for this same user; never another user's.
+    currentToken: () => {
+      if (!shellOwnsSession() || session.value?.uid !== streamSession.uid) return undefined;
+      streamJwt = session.value.jwt;
+      return streamJwt;
+    },
     async refreshToken() {
       // Embedded, the refresh cookie lives on the shell's origin, not ours. Use the
       // newer token the shell has already pushed (adoptShellSession), or report the
@@ -1554,6 +1582,8 @@ async function groupChanged(): Promise<void> {
 function teardownSession(): void {
   revalidationPending = false;
   clearTimeout(revalidationTimer);
+  clearTimeout(remintRetryTimer);
+  remintRetries = 0;
   authRecoveryNeeded = false;
   remint.reset();
   viewGeneration += 1;
@@ -1640,6 +1670,8 @@ onBeforeUnmount(() => {
   document.removeEventListener("visibilitychange", onVisible);
   window.removeEventListener("focus", rereadAgentDirectory);
   window.removeEventListener("online", rereadAgentDirectory);
+  window.removeEventListener("online", remintWhenOnline);
+  clearTimeout(remintRetryTimer);
   clearTimeout(pressTimer);
   clearTimeout(locateTimer);
   teardownSession();

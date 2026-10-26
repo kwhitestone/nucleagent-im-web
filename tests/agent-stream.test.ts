@@ -250,3 +250,42 @@ test("agent stream refreshes proactively before the access token expires", async
   assert.equal(refreshes, 1, "rotated once, without waiting for a 401");
   assert.equal(tokens[1], "rotated-1");
 });
+
+// MUYU-161: the embedded stream presented a token the shell had already replaced and got a
+// 401 at every renewal boundary. It now reads the held token before each (re)connect.
+test("agent stream adopts the owner's newer token before reconnecting, without a 401", async () => {
+  const controller = new AbortController();
+  const auth: string[] = [];
+  let held = "jwt-1", call = 0;
+  await connectAgentStream({
+    baseUrl: "http://im.test", channelId: "7@42", channelType: 1, jwt: "jwt-1",
+    signal: controller.signal, retryDelay: async () => {}, onEvent() {},
+    currentToken: () => held,
+    refreshToken: async () => { throw new Error("must not be needed"); },
+    fetcher: (async (_i: RequestInfo | URL, init?: RequestInit) => {
+      auth.push((init?.headers as Record<string, string>).Authorization);
+      call += 1;
+      if (call === 1) { held = "jwt-2"; return new Response("", { status: 200 }); }
+      controller.abort();
+      return new Response("", { status: 200 });
+    }) as typeof fetch,
+  });
+  assert.deepEqual(auth, ["jwt-1", "jwt-2"]);
+});
+
+test("agent stream keeps its own token when the owner holds none (signed out / other user)", async () => {
+  const controller = new AbortController();
+  const auth: string[] = [];
+  let call = 0;
+  await connectAgentStream({
+    baseUrl: "http://im.test", channelId: "7@42", channelType: 1, jwt: "jwt-1",
+    signal: controller.signal, retryDelay: async () => {}, onEvent() {},
+    currentToken: () => undefined,
+    fetcher: (async (_i: RequestInfo | URL, init?: RequestInit) => {
+      auth.push((init?.headers as Record<string, string>).Authorization);
+      if (++call === 2) controller.abort();
+      return new Response("", { status: 200 });
+    }) as typeof fetch,
+  });
+  assert.deepEqual(auth, ["jwt-1", "jwt-1"]);
+});

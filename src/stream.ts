@@ -63,6 +63,12 @@ interface ConnectAgentStreamOptions {
    * retried forever, which is the 1 Hz 401 storm this option exists to prevent.
    */
   refreshToken?: () => Promise<string>;
+  /**
+   * The newest credential the owner already holds (embedded: the shell's last push for
+   * the same user). Read before every (re)connect so a reconnect never presents a token
+   * that has since been replaced; `undefined` keeps the stream's own token.
+   */
+  currentToken?: () => string | undefined;
   /** Access token lifetime; the proactive refresh fires `refreshLeadMs` before it. */
   tokenTtlMs?: number;
   refreshLeadMs?: number;
@@ -266,6 +272,11 @@ export async function connectAgentStream(options: ConnectAgentStreamOptions): Pr
   };
 
   while (!options.signal.aborted) {
+    const held = options.currentToken?.();
+    if (held && held !== jwt) {
+      jwt = held;
+      tokenMintedAt = now();
+    }
     // Proactive rotation: replace the token before the server starts rejecting it.
     if (options.refreshToken && now() - tokenMintedAt >= ttl - lead) await refresh();
 

@@ -45,7 +45,10 @@ function fixture(state = "connected") {
     syncConversations: noop, syncGroups: noop, refreshActiveHistory: noop,
     openPendingConversation: noop, refreshAgentPresentation: noop, readAgentCapabilities: noop,
     batch: { refreshHidden: noop, reset: noop }, agentDirectory: { clear: noop },
-    removeListeners: noop, resetNames: noop, clearTimeout: noop,
+    removeListeners: noop, resetNames: noop,
+    timers: [] as Array<{ fn: () => void; ms: number; cleared?: boolean }>,
+    setTimeout: (fn: () => void, ms: number) => { const t = { fn, ms }; context.timers.push(t); return t; },
+    clearTimeout: (t?: { cleared?: boolean }) => { if (t) t.cleared = true; },
     viewGeneration: 0, streamAbort: undefined, directoryEpoch: 0,
     directoryReading: undefined, directoryTimer: undefined, pendingConversationTarget: null,
     shellBridge: { reportAuthRequired: noop },
@@ -230,4 +233,56 @@ test("revalidation resume survives the shell's duplicate token delivery during t
   assert.equal(f.pending.length, 1, "the duplicate must not mint again");
   assert.deepEqual(f.calls, [`mint:${jwt(2)}`, "disconnect", "connect", "stream:kept-channel"]);
   assert.equal(f.context.draft.value, "unsent draft");
+});
+
+// MUYU-161 DEV 30-min foreground: the shell renewed exactly as the network dropped, the
+// re-mint fetch failed in transport, the SDK socket was already closed with reconnect off,
+// and nothing ever reconnected (stuck on 连接中 for 120 s after the network came back).
+test("a re-mint that fails in transport is retried with backoff and reconnects", async () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  const resume = f.adopt(jwt(2));
+  f.pending[0].reject(new TypeError("Failed to fetch"));
+  await resume;
+  const retry = f.context.timers.filter((t: any) => !t.cleared).at(-1);
+  assert.equal(retry?.ms, 2000);
+  retry.fn();
+  assert.equal(f.pending.length, 2, "retry mints again");
+  f.pending[1].resolve(envelope(jwt(2)));
+  await flush();
+  assert.ok(f.calls.includes("connect"));
+  assert.equal(f.context.draft.value, "unsent draft");
+});
+
+test("coming back online retries a pending re-mint at once", async () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  const resume = f.adopt(jwt(2));
+  f.pending[0].reject(new TypeError("Failed to fetch"));
+  await resume;
+  f.run("remintWhenOnline()");
+  assert.equal(f.pending.length, 2);
+});
+
+test("a server refusal of the re-mint is not retried on a timer (fail-closed, no loop)", async () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  const resume = f.adopt(jwt(2));
+  f.pending[0].reject(new Error("401 unauthorized"));
+  await resume;
+  assert.equal(f.context.timers.filter((t: any) => !t.cleared && t.ms === 2000).length, 0);
+  assert.equal(f.pending.length, 1);
+});
+
+test("sign-out or account switch cancels a pending transport retry", async () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  const resume = f.adopt(jwt(2));
+  f.pending[0].reject(new TypeError("Failed to fetch"));
+  await resume;
+  const retry = f.context.timers.filter((t: any) => !t.cleared).at(-1);
+  f.run("teardownSession()");
+  assert.equal(retry.cleared, true);
+  f.run("remintWhenOnline()");
+  assert.equal(f.pending.length, 1, "no mint after teardown");
 });
