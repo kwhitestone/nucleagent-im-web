@@ -58,3 +58,13 @@ test("stream retry stops at once on sign-out or a different user (read returns n
   }));
   assert.equal(ticks, 1);
 });
+
+test("parseShellAuth sign-out barrier: same or older version refused, newer accepted, none when null", () => {
+  const auth = (sessionVersion: number, token: string | null = "t") => ({ source: "shell", type: "auth", token, sessionVersion });
+  assert.equal(parseShellAuth(auth(5), 5, null, 5), null);
+  assert.equal(parseShellAuth(auth(4), 4, null, 5), null);
+  assert.deepEqual(parseShellAuth(auth(6), 5, null, 5), { token: "t", sessionVersion: 6 });
+  assert.deepEqual(parseShellAuth(auth(5), 5, null, null), { token: "t", sessionVersion: 5 });
+  // A sign-out itself is never blocked by the barrier.
+  assert.deepEqual(parseShellAuth(auth(5, null), 5, null, 5), { token: null, sessionVersion: 5 });
+});

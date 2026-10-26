@@ -52,6 +52,7 @@ export function parseShellAuth(
   payload: unknown,
   lastVersion: number,
   revalidatedFrom: number | null = null,
+  signedOutAt: number | null = null,
 ): ShellAuthIntent | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const value = payload as {
@@ -72,6 +73,10 @@ export function parseShellAuth(
   if (token !== null && token !== undefined) {
     if (typeof token !== "string" || !token.length || token.length > 8192) return null;
     if (version < lastVersion) return null;
+    // Sign-out barrier: once a sign-out was accepted at version V, a credential for V or
+    // earlier is a stale or duplicated copy (the shell delivers every intent more than
+    // once) and must never revive the session. Only a newer version can sign in again.
+    if (signedOutAt !== null && version <= signedOutAt) return null;
   } else if (version < lastVersion) return null;
   if (value.permissions !== undefined && (!Array.isArray(value.permissions) || value.permissions.length > 512)) {
     return null;
@@ -146,6 +151,8 @@ export function installShellBridge(options: ShellBridgeOptions): ShellBridge {
   let authenticated = false;
   // The version a revalidation in progress started from (null when none).
   let revalidatedFrom: number | null = null;
+  // The version of the last accepted sign-out (null while signed in).
+  let signedOutAt: number | null = null;
   const channel = createRemoteChildChannel({
     appId: "im",
     hostOrigin: new URL(shellOrigin).origin,
@@ -164,9 +171,13 @@ export function installShellBridge(options: ShellBridgeOptions): ShellBridge {
         return;
       }
       if (type !== "auth") return;
-      const intent = parseShellAuth(payload, lastVersion, revalidatedFrom);
+      const intent = parseShellAuth(payload, lastVersion, revalidatedFrom, signedOutAt);
       if (!intent) return;
       if (intent.repeat) return; // duplicate delivery of a revalidation at this version
+      // A real sign-out (not a revalidation) raises the barrier to its version; a
+      // revalidation keeps the same-version proven token admissible.
+      if (intent.token === null && !intent.revalidating) signedOutAt = intent.sessionVersion;
+      else if (intent.token !== null) signedOutAt = null;
       // Remember which version a revalidation started from for as long as the session
       // stays at the version it moved to: a duplicate copy of it can arrive before or
       // after the proven token (same version) and must not read as a sign-out. Any

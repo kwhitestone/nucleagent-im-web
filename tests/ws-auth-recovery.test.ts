@@ -341,3 +341,18 @@ test("duplicate re-mint triggers for the same session share one mint", async () 
   await a;
   assert.equal(f.calls.filter((c) => c === "connect").length, 1);
 });
+
+// MUYU-161 (regression guard for the App side, independent of the bridge barrier): a same-user
+// re-mint in flight when the shell signs out must not reconnect or restore anything
+// (teardown fences it by session identity).
+test("sign-out during an in-flight same-user re-mint does not revive the old session", async () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  const resume = f.adopt(jwt(2));
+  f.run("teardownSession()");
+  f.pending[0].resolve(envelope(jwt(2)));
+  await resume;
+  assert.equal(f.context.session.value, undefined);
+  assert.equal(f.calls.filter((c) => c === "connect").length, 0);
+  assert.equal(f.calls.filter((c) => c.startsWith("stream:")).length, 0);
+});

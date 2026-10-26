@@ -194,3 +194,23 @@ test("MUYU-161: a shell revalidation through the real onAuth keeps the view and 
   assert.ok(h.state.session.value, "view kept during revalidation");
   assert.equal(h.state.connection.value, "connecting");
 });
+
+test("MUYU-161: after the 12 s revalidation timeout signs out locally, the shell's same-version proven token is accepted again", async () => {
+  const h = harness();
+  h.intents.onAuth({ token: "old-login", sessionVersion: 1 });
+  h.login("1");
+  await flush();
+  h.connected();
+  await flush();
+  h.state.WKSDK = { shared: () => ({ disconnect() {}, chatManager: {}, conversationManager: {} }) };
+  const timers: Array<() => void> = [];
+  h.state.setTimeout = (fn: () => void) => { timers.push(fn); return timers.length; };
+  h.intents.onAuth({ token: null, sessionVersion: 2, revalidating: true });
+  timers.at(-1)!(); // the shell's proof never arrived in time
+  assert.equal(h.state.session.value, undefined, "timed-out revalidation signs out (fail-closed)");
+  // The shell later pushes the credential it really holds for version 2: a fresh sign-in.
+  h.intents.onAuth({ token: "proven-v2", sessionVersion: 2 });
+  h.login("1");
+  await flush();
+  assert.ok(h.state.session.value, "same-version proven token after a local timeout signs in again");
+});

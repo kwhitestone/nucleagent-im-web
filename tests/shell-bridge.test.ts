@@ -305,3 +305,69 @@ test("a real sign-out at the same version right after a resolved revalidation st
     assert.deepEqual(received.at(-1), { token: null, sessionVersion: 21 });
   });
 });
+
+// MUYU-161 verifier finding: after a sign-out at version V, a late (duplicated) copy of the
+// V credential was accepted and revived the session. The sign-out is now a version barrier.
+test("a late same-version credential after a sign-out never revives the session", () => {
+  withFramedWindow((frame) => {
+    const received: Array<string | null> = [];
+    installShellBridge({ onAuth: (intent) => received.push(intent.token) });
+    const send = (payload: unknown) => frame.deliver({ source: frame.parent, origin: shellOrigin, data: hostEnvelope("auth", payload) });
+    frame.deliver({ source: frame.parent, origin: shellOrigin, data: hostEnvelope("host:init", undefined) });
+    send(authPayload({ sessionVersion: 5, token: "old" }));
+    send({ source: "shell", type: "auth", token: null, sessionVersion: 5 }); // sign-out at the same version
+    send(authPayload({ sessionVersion: 5, token: "old" }));                 // late duplicate copy
+    send(authPayload({ sessionVersion: 4, token: "older" }));               // stale
+    assert.deepEqual(received, ["old", null], "nothing after the sign-out is accepted");
+    send(authPayload({ sessionVersion: 6, token: "fresh-login" }));         // a real new sign-in
+    assert.deepEqual(received, ["old", null, "fresh-login"]);
+  });
+});
+
+test("the barrier also holds when the sign-out advanced the version", () => {
+  withFramedWindow((frame) => {
+    const received: Array<string | null> = [];
+    installShellBridge({ onAuth: (intent) => received.push(intent.token) });
+    const send = (payload: unknown) => frame.deliver({ source: frame.parent, origin: shellOrigin, data: hostEnvelope("auth", payload) });
+    frame.deliver({ source: frame.parent, origin: shellOrigin, data: hostEnvelope("host:init", undefined) });
+    send(authPayload({ sessionVersion: 7, token: "a" }));
+    send({ source: "shell", type: "auth", token: null, sessionVersion: 8 });
+    send(authPayload({ sessionVersion: 8, token: "a" }));
+    send(authPayload({ sessionVersion: 8, token: "a" }));
+    assert.deepEqual(received, ["a", null]);
+  });
+});
+
+test("a revalidation is not a sign-out: its same-version proven token (and duplicates) still resume", () => {
+  withFramedWindow((frame) => {
+    const received: Array<[string | null, boolean]> = [];
+    installShellBridge({ onAuth: (intent) => received.push([intent.token, !!intent.revalidating]) });
+    const send = (payload: unknown) => frame.deliver({ source: frame.parent, origin: shellOrigin, data: hostEnvelope("auth", payload) });
+    frame.deliver({ source: frame.parent, origin: shellOrigin, data: hostEnvelope("host:init", undefined) });
+    send(authPayload({ sessionVersion: 30, token: "t30" }));
+    const reval = { source: "shell", type: "auth", token: null, sessionVersion: 31, revalidation: { previousVersion: 30 } };
+    send(reval); send(reval);
+    send(authPayload({ sessionVersion: 31, token: "t31" }));
+    send(authPayload({ sessionVersion: 31, token: "t31" }));
+    assert.deepEqual(received, [["t30", false], [null, true], ["t31", false], ["t31", false]]);
+    // ...and a real sign-out after that is still a barrier for the same version.
+    send({ source: "shell", type: "auth", token: null, sessionVersion: 31 });
+    send(authPayload({ sessionVersion: 31, token: "t31" }));
+    assert.deepEqual(received.at(-1), [null, false]);
+  });
+});
+
+test("account switch (regression guard, held by the version order, not the new barrier): the old user's late credential cannot replace the new user's session", () => {
+  withFramedWindow((frame) => {
+    const received: Array<string | null> = [];
+    installShellBridge({ onAuth: (intent) => received.push(intent.token) });
+    const send = (payload: unknown) => frame.deliver({ source: frame.parent, origin: shellOrigin, data: hostEnvelope("auth", payload) });
+    frame.deliver({ source: frame.parent, origin: shellOrigin, data: hostEnvelope("host:init", undefined) });
+    send(authPayload({ sessionVersion: 40, token: "user-a" }));
+    send({ source: "shell", type: "auth", token: null, sessionVersion: 41 });
+    send(authPayload({ sessionVersion: 42, token: "user-b" }));
+    send(authPayload({ sessionVersion: 40, token: "user-a" })); // late copy of the old user
+    send(authPayload({ sessionVersion: 41, token: "user-a" }));
+    assert.deepEqual(received, ["user-a", null, "user-b"]);
+  });
+});
