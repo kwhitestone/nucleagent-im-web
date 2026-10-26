@@ -40,6 +40,7 @@ function fixture(state = "connected") {
     },
     WKSDK: { shared: () => ({ disconnect: () => calls.push("disconnect"), conversationManager: {} }) },
     configureSDK: () => ({ connect: () => calls.push("connect") }),
+    startAgentStream: (channel: { channelID: string }) => calls.push(`stream:${channel.channelID}`),
     startSession: (next: ReturnType<typeof envelope>) => { context.session.value = next; },
     syncConversations: noop, syncGroups: noop, refreshActiveHistory: noop,
     openPendingConversation: noop, refreshAgentPresentation: noop, readAgentCapabilities: noop,
@@ -160,3 +161,60 @@ for (const rejectOld of [false, true]) {
     assert.equal(f.calls.filter((call) => call === "connect").length, 1);
   });
 }
+
+// MUYU-161: after a shell cross-tab revalidation the view (draft, open channel) survives;
+// the same user's proven token re-mints and reconnects, another user tears it down.
+test("revalidation resume: same user keeps draft and channel, re-mints once, reconnects", async () => {
+  const f = fixture();
+  const channel = f.context.activeChannel.value;
+  f.run("revalidationPending = true");
+  const resume = f.adopt(jwt(2));
+  assert.equal(f.pending.length, 1);
+  f.pending[0].resolve(envelope(jwt(2)));
+  await resume;
+  assert.deepEqual(f.calls, [`mint:${jwt(2)}`, "disconnect", "connect", "stream:kept-channel"]);
+  assert.equal(f.context.draft.value, "unsent draft");
+  assert.equal(f.context.activeChannel.value, channel);
+  assert.equal(f.run("revalidationPending"), false);
+});
+
+test("revalidation resume with the unchanged token still reconnects (socket was closed)", async () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  const resume = f.adopt(jwt(1));
+  f.pending[0].resolve(envelope(jwt(1)));
+  await resume;
+  assert.deepEqual(f.calls, [`mint:${jwt(1)}`, "disconnect", "connect", "stream:kept-channel"]);
+});
+
+test("revalidation resolving to a different user tears the old view down (fail-closed)", async () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  const other = f.adopt(jwt(2, 22));
+  assert.equal(f.context.draft.value === "unsent draft" && f.context.session.value?.uid === "11", false);
+  f.pending[0].resolve(envelope(jwt(2, 22), "22"));
+  await other;
+  assert.equal(f.context.session.value.uid, "22");
+  assert.equal(f.run("revalidationPending"), false);
+});
+
+test("teardown clears a pending revalidation", () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  f.run("teardownSession()");
+  assert.equal(f.run("revalidationPending"), false);
+});
+
+test("revalidation resume whose re-mint fails retries on the next same-user renewal", async () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  const resume = f.adopt(jwt(2));
+  f.pending[0].reject(new Error("401"));
+  await resume;
+  assert.equal(f.run("authRecoveryNeeded"), true);
+  const retry = f.adopt(jwt(3));
+  assert.equal(f.pending.length, 2, "next renewal must re-mint");
+  f.pending[1].resolve(envelope(jwt(3)));
+  await retry;
+  assert.ok(f.calls.includes("connect"));
+});

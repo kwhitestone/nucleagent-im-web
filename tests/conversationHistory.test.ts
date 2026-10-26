@@ -10,7 +10,8 @@ import { resolveConversationTarget } from "../src/conversationTarget.ts";
 const app = parse(readFileSync(new URL("../src/App.vue", import.meta.url), "utf8"));
 const source = ts.createSourceFile("App.ts", app.descriptor.scriptSetup!.content, ts.ScriptTarget.Latest, true);
 const names = new Set(["openPendingConversation", "openChannel", "adoptShellSession",
-  "pendingConversationTarget", "shellAuthGeneration", "shellBridge", "connectStatusListener"]);
+  "pendingConversationTarget", "shellAuthGeneration", "shellBridge", "connectStatusListener",
+  "shellSignedOut", "revalidationPending", "revalidationTimer", "SHELL_REVALIDATION_MS"]);
 const handlers = source.statements.filter((node) =>
   ts.isFunctionDeclaration(node) ? names.has(node.name?.text ?? "") :
     ts.isVariableStatement(node) && node.declarationList.declarations.some((d) =>
@@ -66,6 +67,7 @@ function harness() {
       state.connection.value = "disconnected";
     },
     clearCachedContacts() {}, clearCachedProfile() {}, signInViaShell() {},
+    setTimeout, clearTimeout, streamAbort: undefined,
     installShellBridge: (options: unknown) => {
       intents = options;
       return { reportAuthRequired() {} };

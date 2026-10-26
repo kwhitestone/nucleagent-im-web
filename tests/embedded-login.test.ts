@@ -31,7 +31,8 @@ test("an agentia host is recognised only through the origin-checked handshake, n
   assert.match(app, /onInit\(\) \{\s*agentiaHosted\.value = true;/);
   assert.doesNotMatch(app, /searchParams\.get\(["']embed/);
   // Hosted by agentia, im-web owns its refresh cookie; only the nucleagent shell owns refresh.
-  assert.match(app, /if \(shellOwnsSession\(\)\) \{\s*shellBridge\.reportAuthRequired\("rejected"\);/);
+  // Embedded, a rejected stream token is replaced by the shell's newer push (asking once), never refreshed here.
+  assert.match(app, /if \(shellOwnsSession\(\)\) \{\s*streamJwt = await nextShellCredential\([\s\S]*?shellBridge\.reportAuthRequired\("rejected"\)/);
   // Sign-out with no shell to delegate to revokes here instead of asking a shell that is not there.
   const signOut = app.slice(app.indexOf("function signOut"), app.indexOf("// Unmount is app teardown"));
   assert.match(signOut, /if \(agentiaHosted\.value\) \{[\s\S]*teardownSession\(\);[\s\S]*revokeServerSession\(jwt\);/);

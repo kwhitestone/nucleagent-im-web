@@ -20,6 +20,12 @@ const shellOrigin = configValue("VITE_SHELL_URL");
 export interface ShellAuthIntent {
   token: string | null;
   sessionVersion: number;
+  /**
+   * The shell is re-proving a credential another tab stored (cross-tab sync). It
+   * carries no token and vouches for no identity; only a transition from exactly
+   * the version this child holds is a revalidation, anything else is a sign-out.
+   */
+  revalidating?: true;
 }
 
 /**
@@ -48,6 +54,7 @@ export function parseShellAuth(payload: unknown, lastVersion: number): ShellAuth
     token?: unknown;
     sessionVersion?: unknown;
     permissions?: unknown;
+    revalidation?: unknown;
   };
   if (value.source !== "shell" || value.type !== "auth") return null;
   if (!Number.isSafeInteger(value.sessionVersion) || (value.sessionVersion as number) < 0) return null;
@@ -63,7 +70,37 @@ export function parseShellAuth(payload: unknown, lastVersion: number): ShellAuth
   if (value.permissions !== undefined && (!Array.isArray(value.permissions) || value.permissions.length > 512)) {
     return null;
   }
+  if (typeof token !== "string" && value.revalidation && typeof value.revalidation === "object" &&
+    !Array.isArray(value.revalidation) &&
+    (value.revalidation as { previousVersion?: unknown }).previousVersion === lastVersion &&
+    lastVersion > 0 && version > lastVersion) {
+    return { token: null, sessionVersion: version, revalidating: true };
+  }
   return { token: typeof token === "string" ? token : null, sessionVersion: version };
+}
+
+/**
+ * The credential an embedded child should retry with after the server rejected
+ * `used`. The shell owns refresh: if it has already pushed a newer token, take it;
+ * otherwise ask once and wait (bounded) for the push. Never returns `used`.
+ */
+export async function nextShellCredential(
+  read: () => string | undefined,
+  used: string,
+  ask: () => void,
+  { timeoutMs = 10_000, stepMs = 200, sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms)) } = {},
+): Promise<string> {
+  const fresh = () => { const value = read(); return value && value !== used ? value : undefined; };
+  let value = fresh();
+  if (value) return value;
+  ask();
+  for (let waited = 0; waited < timeoutMs; waited += stepMs) {
+    await sleep(stepMs);
+    value = fresh();
+    if (value) return value;
+    if (!read()) break; // signed out or session changed: nothing to retry with
+  }
+  throw new Error("Shell did not provide a newer credential");
 }
 
 export interface ShellBridge {

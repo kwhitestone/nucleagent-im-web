@@ -59,7 +59,7 @@ import {
   readCallback,
   startPortalLogin,
 } from "./portal";
-import { installShellBridge, isInShell, shellAccountUrl } from "./shell";
+import { installShellBridge, isInShell, nextShellCredential, shellAccountUrl } from "./shell";
 import { installEmbedHost, revokeServerSession } from "./embedHost";
 import { resolveConversationTarget, type ConversationTarget } from "./conversationTarget";
 import {
@@ -707,6 +707,11 @@ function upsertConversation(conversation: Conversation): void {
 // failure before any success stays on authFailed instead of looping.
 const remint = remintGuard();
 let authRecoveryNeeded = false;
+// Shell cross-tab revalidation in progress (see onAuth): view kept, nothing trusted.
+// The shell bounds its own proof at 10 s; allow a little more before signing out.
+const SHELL_REVALIDATION_MS = 12_000;
+let revalidationTimer: ReturnType<typeof setTimeout> | undefined;
+let revalidationPending = false;
 
 const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
   if (status === ConnectStatus.Connected) {
@@ -912,23 +917,44 @@ const shellBridge = installShellBridge({
   },
   onAuth(intent) {
     shellAuthGeneration += 1;
+    clearTimeout(revalidationTimer);
+    if (intent.revalidating && session.value) {
+      // Another shell tab stored a credential and the shell is re-proving it
+      // (cross-tab sync, e.g. that tab refreshed). This is not a sign-out: keep the
+      // view (draft, history, scroll) but trust nothing meanwhile — no socket, no
+      // stream — until the proven token arrives. If it never does, sign out.
+      revalidationPending = true;
+      streamAbort?.abort();
+      WKSDK.shared().disconnect();
+      connection.value = "connecting";
+      const generation = shellAuthGeneration;
+      revalidationTimer = setTimeout(() => {
+        if (generation === shellAuthGeneration) shellSignedOut();
+      }, SHELL_REVALIDATION_MS);
+      return;
+    }
     if (!intent.token) {
-      pendingConversationTarget = null;
-      loggingIn.value = false;
-      // Shell signed out (or bumped the version with no token): drop local state
-      // without revoking anything ourselves — the shell owns the refresh family.
-      // This is an intentional sign-out, so the per-account name cache goes too.
-      if (session.value) {
-        clearCachedContacts(session.value.uid);
-        clearCachedProfile(session.value.uid);
-        teardownSession();
-      }
-      signInViaShell();
+      shellSignedOut();
       return;
     }
     void adoptShellSession(intent.token);
   },
 });
+
+function shellSignedOut(): void {
+  revalidationPending = false;
+  pendingConversationTarget = null;
+  loggingIn.value = false;
+  // Shell signed out (or bumped the version with no token): drop local state
+  // without revoking anything ourselves — the shell owns the refresh family.
+  // This is an intentional sign-out, so the per-account name cache goes too.
+  if (session.value) {
+    clearCachedContacts(session.value.uid);
+    clearCachedProfile(session.value.uid);
+    teardownSession();
+  }
+  signInViaShell();
+}
 
 // Embedded with no session: the shell's auth intent normally lands within a
 // frame or two. If it has not after a short grace period (signed out, expired),
@@ -974,13 +1000,23 @@ const disposeEmbedHost = installEmbedHost({
 
 async function adoptShellSession(accessToken: string): Promise<void> {
   const generation = shellAuthGeneration;
-  if (session.value?.jwt === accessToken) return;
+  const resuming = revalidationPending;
+  revalidationPending = false;
+  if (session.value?.jwt === accessToken && !resuming) return;
   // Same user (the routine renewal): swap the login token, keep the socket and its IM token.
   // If WuKongIM ever rejects that token, remintConnectToken mints from this fresh session.jwt.
   if (session.value && renewsSameUser(session.value, accessToken)) {
     session.value = { ...session.value, jwt: accessToken };
-    // An earlier remint may have failed with the expired shell credential.
+    // A revalidation closed the socket and stream: re-mint and reconnect (the
+    // Connected listener re-syncs history), then reopen the open channel's stream.
+    // An earlier remint may also have failed with the expired shell credential.
+    // Mark a resume as pending recovery so a failed re-mint retries on the next
+    // renewal instead of leaving the view stuck (Connected clears it).
+    if (resuming) authRecoveryNeeded = true;
     if (authRecoveryNeeded) await remintConnectToken();
+    if (resuming && generation === shellAuthGeneration && session.value && activeChannel.value) {
+      startAgentStream(activeChannel.value, viewGeneration);
+    }
     return;
   }
   pendingConversationTarget = null;
@@ -1155,19 +1191,26 @@ function startAgentStream(channel: Channel, generation: number): void {
   if (!session.value) return;
 
   streamAbort = new AbortController();
+  const streamSession = session.value;
+  let streamJwt = streamSession.jwt;
   void connectAgentStream({
     baseUrl: imBase,
-    channelId: browserStreamChannelId(channel.channelID, channel.channelType, session.value.uid),
+    channelId: browserStreamChannelId(channel.channelID, channel.channelType, streamSession.uid),
     channelType: channel.channelType,
-    jwt: session.value.jwt,
+    jwt: streamJwt,
     signal: streamAbort.signal,
     async refreshToken() {
-      // Embedded, the refresh cookie lives on the shell's origin, not ours.
-      // Report the rejection instead; the shell rotates and re-pushes an auth
-      // intent, which lands in adoptShellSession and rebuilds the session.
+      // Embedded, the refresh cookie lives on the shell's origin, not ours. Use the
+      // newer token the shell has already pushed (adoptShellSession), or report the
+      // rejection once and wait for that push. Retrying the rejected token is the
+      // repeated-401 loop; another user's session is never borrowed.
       if (shellOwnsSession()) {
-        shellBridge.reportAuthRequired("rejected");
-        throw new Error("Shell owns the session refresh");
+        streamJwt = await nextShellCredential(
+          () => (session.value?.uid === streamSession.uid ? session.value.jwt : undefined),
+          streamJwt,
+          () => shellBridge.reportAuthRequired("rejected"),
+        );
+        return streamJwt;
       }
       const next = await refreshSession();
       // Keep the rest of the app on the rotated credentials, not just this stream.
@@ -1505,6 +1548,8 @@ async function groupChanged(): Promise<void> {
 }
 
 function teardownSession(): void {
+  revalidationPending = false;
+  clearTimeout(revalidationTimer);
   authRecoveryNeeded = false;
   remint.reset();
   viewGeneration += 1;
