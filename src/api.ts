@@ -114,6 +114,9 @@ export function renewsSameUser(current: ConnectSession | undefined, accessToken:
 
 // Local password, portal SSO and refresh all return the same local login envelope, so
 // the IM handoff is shared: one connect-token exchange bound to that access token.
+/** Bound on the connect-token exchange; a timeout rejects as a transport failure. */
+export const CONNECT_TOKEN_TIMEOUT_MS = 15_000;
+
 export async function imSession(login: LoginData): Promise<ConnectSession> {
   if (!login.accessToken) throw new Error("Auth response did not include accessToken");
   const connectResponse = await fetch(`${imBase}/api/v1/im/connect-token`, {
@@ -121,6 +124,8 @@ export async function imSession(login: LoginData): Promise<ConnectSession> {
     headers: {
       Authorization: login.accessToken,
     },
+    // A hung mint must not hold the single-flight re-mint forever (MUYU-161).
+    signal: AbortSignal.timeout(CONNECT_TOKEN_TIMEOUT_MS),
   });
   const connect = await readEnvelope<ConnectData>(connectResponse);
   if (!connect.uid || !connect.token || !connect.wsAddr) {

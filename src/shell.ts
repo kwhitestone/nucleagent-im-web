@@ -83,8 +83,9 @@ export function parseShellAuth(
       return { token: null, sessionVersion: version, revalidating: true };
     }
     // The shell delivers each intent more than once (observed: every auth message
-    // arrives twice). A repeat of the revalidation already in progress is that same
-    // revalidation, not a sign-out; it cannot extend or change anything.
+    // arrives twice, not always adjacent). A copy of the revalidation that moved the
+    // session to this very version is that same revalidation, not a sign-out; it
+    // cannot extend or change anything.
     if (revalidatedFrom !== null && previous === revalidatedFrom && version === lastVersion) {
       return { token: null, sessionVersion: version, revalidating: true, repeat: true };
     }
@@ -165,8 +166,13 @@ export function installShellBridge(options: ShellBridgeOptions): ShellBridge {
       if (type !== "auth") return;
       const intent = parseShellAuth(payload, lastVersion, revalidatedFrom);
       if (!intent) return;
-      if (intent.repeat) return; // duplicate delivery of the revalidation in progress
-      revalidatedFrom = intent.revalidating ? lastVersion : null;
+      if (intent.repeat) return; // duplicate delivery of a revalidation at this version
+      // Remember which version a revalidation started from for as long as the session
+      // stays at the version it moved to: a duplicate copy of it can arrive before or
+      // after the proven token (same version) and must not read as a sign-out. Any
+      // version change forgets it, so an old revalidation replayed later still signs out.
+      if (intent.revalidating) revalidatedFrom = lastVersion;
+      else if (intent.sessionVersion !== lastVersion || intent.token === null) revalidatedFrom = null;
       lastVersion = intent.sessionVersion;
       authenticated = intent.token !== null;
       options.onAuth(intent);

@@ -286,3 +286,58 @@ test("sign-out or account switch cancels a pending transport retry", async () =>
   f.run("remintWhenOnline()");
   assert.equal(f.pending.length, 1, "no mint after teardown");
 });
+
+// Independent review MUST-FIX: while a shell revalidation is pending nothing is trusted,
+// so neither a scheduled transport retry nor `online` may mint and reconnect.
+test("a pending revalidation blocks the transport retry and the online re-mint", async () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  const resume = f.adopt(jwt(2));
+  f.pending[0].reject(new TypeError("Failed to fetch"));
+  await resume;
+  const retry = f.context.timers.filter((t: any) => !t.cleared).at(-1);
+  f.run("revalidationPending = true"); // another tab starts a new revalidation (state as onAuth sets it)
+  retry.fn();
+  f.run("remintWhenOnline()");
+  assert.equal(f.pending.length, 1, "no mint while revalidating");
+  assert.equal(f.calls.filter((c) => c === "connect").length, 0);
+});
+
+test("a mint that resolves after a new revalidation started does not reconnect", async () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  const resume = f.adopt(jwt(2));
+  f.run("revalidationPending = true");
+  f.pending[0].resolve(envelope(jwt(2)));
+  await resume;
+  assert.equal(f.calls.filter((c) => c === "connect").length, 0);
+});
+
+test("transport retries are bounded", async () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  const resume = f.adopt(jwt(2));
+  f.pending[0].reject(new TypeError("Failed to fetch"));
+  await resume;
+  for (let i = 1; i < 20; i++) {
+    const t = f.context.timers.filter((x: any) => !x.cleared && !x.fired).at(-1);
+    if (!t) break;
+    t.fired = true;
+    t.fn();
+    f.pending.at(-1)!.reject(new TypeError("Failed to fetch"));
+    await flush();
+  }
+  assert.equal(f.pending.length, 7, "exactly 1 + 6 bounded retries");
+});
+
+test("duplicate re-mint triggers for the same session share one mint", async () => {
+  const f = fixture();
+  f.run("authRecoveryNeeded = true");
+  const a = f.run("remintConnectToken()");
+  f.run("remintWhenOnline()");
+  f.run("remintConnectToken()");
+  assert.equal(f.pending.length, 1);
+  f.pending[0].resolve(envelope(jwt(1)));
+  await a;
+  assert.equal(f.calls.filter((c) => c === "connect").length, 1);
+});

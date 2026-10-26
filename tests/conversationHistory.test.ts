@@ -11,7 +11,8 @@ const app = parse(readFileSync(new URL("../src/App.vue", import.meta.url), "utf8
 const source = ts.createSourceFile("App.ts", app.descriptor.scriptSetup!.content, ts.ScriptTarget.Latest, true);
 const names = new Set(["openPendingConversation", "openChannel", "adoptShellSession",
   "pendingConversationTarget", "shellAuthGeneration", "shellBridge", "connectStatusListener",
-  "shellSignedOut", "revalidationPending", "revalidationTimer", "SHELL_REVALIDATION_MS"]);
+  "shellSignedOut", "revalidationPending", "revalidationTimer", "SHELL_REVALIDATION_MS",
+  "remintRetryTimer"]);
 const handlers = source.statements.filter((node) =>
   ts.isFunctionDeclaration(node) ? names.has(node.name?.text ?? "") :
     ts.isVariableStatement(node) && node.declarationList.declarations.some((d) =>
@@ -179,4 +180,17 @@ test("opening a DM with yourself sends nothing and says why; another person stil
   assert.deepEqual(h.requests, [{ channelID: "13", channelType: 1 }]);
   assert.equal(streams + reads, 2);
   assert.equal(h.state.loginError.value, "");
+});
+
+test("MUYU-161: a shell revalidation through the real onAuth keeps the view and shows connecting", async () => {
+  const h = harness();
+  h.intents.onAuth({ token: "old-login", sessionVersion: 1 });
+  h.login("1");
+  await flush();
+  h.connected();
+  await flush();
+  h.state.WKSDK = { shared: () => ({ disconnect() {}, chatManager: {}, conversationManager: {} }) };
+  h.intents.onAuth({ token: null, sessionVersion: 2, revalidating: true });
+  assert.ok(h.state.session.value, "view kept during revalidation");
+  assert.equal(h.state.connection.value, "connecting");
 });

@@ -714,12 +714,15 @@ const SHELL_REVALIDATION_MS = 12_000;
 let revalidationTimer: ReturnType<typeof setTimeout> | undefined;
 let revalidationPending = false;
 // A re-mint that failed in transport (offline) is retried: by then the SDK socket is
-// closed with reconnect off, so nothing else would bring the connection back.
-const REMINT_RETRY_MS = [2_000, 5_000, 10_000, 30_000];
+// closed with reconnect off, so nothing else would bring the connection back. Bounded,
+// single-flight, and never while a shell revalidation is pending (nothing is trusted then).
+const REMINT_RETRY_MS = [2_000, 5_000, 10_000, 30_000, 30_000, 30_000];
 let remintRetries = 0;
 let remintRetryTimer: ReturnType<typeof setTimeout> | undefined;
+let remintInFlight: [Promise<void>, unknown] | undefined;
+const mayRemint = (current: unknown) => session.value === current && authRecoveryNeeded && !revalidationPending;
 function remintWhenOnline(): void {
-  if (authRecoveryNeeded && session.value) {
+  if (session.value && mayRemint(session.value)) {
     remintRetries = 0;
     void remintConnectToken();
   }
@@ -936,6 +939,7 @@ const shellBridge = installShellBridge({
       // view (draft, history, scroll) but trust nothing meanwhile — no socket, no
       // stream — until the proven token arrives. If it never does, sign out.
       revalidationPending = true;
+      clearTimeout(remintRetryTimer);
       streamAbort?.abort();
       WKSDK.shared().disconnect();
       connection.value = "connecting";
@@ -1025,6 +1029,7 @@ async function adoptShellSession(accessToken: string): Promise<void> {
     // Mark a resume as pending recovery so a failed re-mint retries on the next
     // renewal instead of leaving the view stuck (Connected clears it).
     if (resuming) authRecoveryNeeded = true;
+    remintRetries = 0; // a new credential earns a fresh, still bounded, retry budget
     const resumedUid = session.value.uid;
     if (authRecoveryNeeded) await remintConnectToken();
     // The shell delivers each intent twice, so the generation may have moved on by a
@@ -1130,12 +1135,24 @@ function markChannelRead(channel: Channel): void {
 }
 
 async function remintConnectToken(): Promise<void> {
+  // Single flight per session: duplicate triggers (online + timer + renewal) for the same
+  // credential share one mint. A newer credential mints at once; the older mint's result
+  // is fenced by the session check in remintOnce.
+  if (remintInFlight && remintInFlight[1] === session.value) return remintInFlight[0];
+  const flight: Promise<void> = remintOnce().finally(() => {
+    if (remintInFlight?.[0] === flight) remintInFlight = undefined;
+  });
+  remintInFlight = [flight, session.value];
+  return flight;
+}
+
+async function remintOnce(): Promise<void> {
   const current = session.value;
   if (!current) return;
   clearTimeout(remintRetryTimer);
   try {
     const next = await imSession({ accessToken: current.jwt });
-    if (session.value !== current) return;
+    if (session.value !== current || revalidationPending) return;
     remintRetries = 0;
     session.value = next;
     WKSDK.shared().disconnect(); // close the refused socket before the SDK opens a new one
@@ -1145,11 +1162,13 @@ async function remintConnectToken(): Promise<void> {
   } catch (error) {
     // Keep recovery pending even if socket close has changed the displayed status.
     // A transport failure (offline, blip: fetch rejects with TypeError) is retried with
-    // backoff and on `online`; a server refusal is not — the next renewal retries that.
-    if ((error as Error | undefined)?.name === "TypeError" && session.value === current && authRecoveryNeeded) {
-      const delay = REMINT_RETRY_MS[Math.min(remintRetries++, REMINT_RETRY_MS.length - 1)];
+    // bounded backoff and on `online`; a server refusal is not — the next renewal retries that.
+    const name = (error as Error | undefined)?.name;
+    if ((name === "TypeError" || name === "TimeoutError" || name === "AbortError") && mayRemint(current) &&
+      remintRetries < REMINT_RETRY_MS.length) {
+      const delay = REMINT_RETRY_MS[remintRetries++];
       remintRetryTimer = setTimeout(() => {
-        if (session.value === current && authRecoveryNeeded) void remintConnectToken();
+        if (mayRemint(current)) void remintConnectToken();
       }, delay);
     }
   }
