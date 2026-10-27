@@ -28,6 +28,12 @@ export interface ShellAuthIntent {
   revalidating?: true;
   /** A duplicate delivery of the revalidation already in progress: ignore it. */
   repeat?: true;
+  /**
+   * The identity the shell has proven for this token (`principal.id`), or null when the
+   * shell pushes a credential it has not proven (e.g. its cross-tab proof failed).
+   * Absent when the shell does not send the field.
+   */
+  principal?: string | null;
 }
 
 /**
@@ -62,6 +68,7 @@ export function parseShellAuth(
     sessionVersion?: unknown;
     permissions?: unknown;
     revalidation?: unknown;
+    principal?: unknown;
   };
   if (value.source !== "shell" || value.type !== "auth") return null;
   if (!Number.isSafeInteger(value.sessionVersion) || (value.sessionVersion as number) < 0) return null;
@@ -94,6 +101,13 @@ export function parseShellAuth(
     if (revalidatedFrom !== null && previous === revalidatedFrom && version === lastVersion) {
       return { token: null, sessionVersion: version, revalidating: true, repeat: true };
     }
+  }
+  if (typeof token === "string" && "principal" in value) {
+    const id = (value.principal as { id?: unknown } | null)?.id;
+    // Same rule as the shell: a principal is a positive safe integer id (sent as a string).
+    const n = typeof id === "string" && /^[1-9][0-9]*$/.test(id) ? Number(id) : typeof id === "number" ? id : NaN;
+    const principal = Number.isSafeInteger(n) && n > 0 ? String(n) : null;
+    return { token, sessionVersion: version, principal };
   }
   return { token: typeof token === "string" ? token : null, sessionVersion: version };
 }

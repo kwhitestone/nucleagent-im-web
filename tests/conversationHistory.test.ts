@@ -12,7 +12,7 @@ const source = ts.createSourceFile("App.ts", app.descriptor.scriptSetup!.content
 const names = new Set(["openPendingConversation", "openChannel", "adoptShellSession",
   "pendingConversationTarget", "shellAuthGeneration", "shellBridge", "connectStatusListener",
   "shellSignedOut", "revalidationPending", "revalidationTimer", "SHELL_REVALIDATION_MS",
-  "remintRetryTimer"]);
+  "remintRetryTimer", "unprovenRejected"]);
 const handlers = source.statements.filter((node) =>
   ts.isFunctionDeclaration(node) ? names.has(node.name?.text ?? "") :
     ts.isVariableStatement(node) && node.declarationList.declarations.some((d) =>

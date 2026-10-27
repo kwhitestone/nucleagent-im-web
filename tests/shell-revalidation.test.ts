@@ -23,7 +23,7 @@ test("anything else shaped like a revalidation still fails closed as a sign-out"
     assert.deepEqual(parseShellAuth({ ...revalidation(7, 8), revalidation: marker }, 7), { token: null, sessionVersion: 8 });
   }
   // A token-bearing intent is a normal auth, never a revalidation.
-  assert.deepEqual(parseShellAuth({ ...revalidation(7, 8), token: "t" }, 7), { token: "t", sessionVersion: 8 });
+  assert.deepEqual(parseShellAuth({ ...revalidation(7, 8), token: "t" }, 7), { token: "t", sessionVersion: 8, principal: null });
   // Stale versions are still rejected outright.
   assert.equal(parseShellAuth(revalidation(7, 5), 7), null);
 });
@@ -67,4 +67,20 @@ test("parseShellAuth sign-out barrier: same or older version refused, newer acce
   assert.deepEqual(parseShellAuth(auth(5), 5, null, null), { token: "t", sessionVersion: 5 });
   // A sign-out itself is never blocked by the barrier.
   assert.deepEqual(parseShellAuth(auth(5, null), 5, null, 5), { token: null, sessionVersion: 5 });
+});
+
+test("parseShellAuth reports the shell's proven principal, null when unproven, absent when not sent", () => {
+  const base = { source: "shell", type: "auth", token: "t", sessionVersion: 3 };
+  assert.deepEqual(parseShellAuth({ ...base, principal: { id: "11" } }, 2), { token: "t", sessionVersion: 3, principal: "11" });
+  assert.deepEqual(parseShellAuth({ ...base, principal: null }, 2), { token: "t", sessionVersion: 3, principal: null });
+  assert.deepEqual(parseShellAuth({ ...base, principal: { id: "" } }, 2), { token: "t", sessionVersion: 3, principal: null });
+  assert.deepEqual(parseShellAuth(base, 2), { token: "t", sessionVersion: 3 });
+});
+
+test("principal ids follow the shell rule: positive integers only", () => {
+  const base = { source: "shell", type: "auth", token: "t", sessionVersion: 3 };
+  for (const bad of [0, -1, "0", "-1", "01", "x", 1.5]) {
+    assert.equal(parseShellAuth({ ...base, principal: { id: bad } }, 2)?.principal, null, String(bad));
+  }
+  assert.equal(parseShellAuth({ ...base, principal: { id: 11 } }, 2)?.principal, "11");
 });

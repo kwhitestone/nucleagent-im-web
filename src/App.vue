@@ -713,6 +713,9 @@ let authRecoveryNeeded = false;
 const SHELL_REVALIDATION_MS = 12_000;
 let revalidationTimer: ReturnType<typeof setTimeout> | undefined;
 let revalidationPending = false;
+// The token a revalidation ended on without the shell's proof (see adoptShellSession).
+// teardownSession must NOT clear it: shellSignedOut sets it and then tears down.
+let unprovenRejected: { token: string } | undefined;
 // A re-mint that failed in transport (offline) is retried: by then the SDK socket is
 // closed with reconnect off, so nothing else would bring the connection back. Bounded,
 // single-flight, and never while a shell revalidation is pending (nothing is trusted then).
@@ -953,7 +956,7 @@ const shellBridge = installShellBridge({
       shellSignedOut();
       return;
     }
-    void adoptShellSession(intent.token);
+    void adoptShellSession(intent.token, intent.principal);
   },
 });
 
@@ -995,6 +998,8 @@ const disposeEmbedHost = installEmbedHost({
   onCredential(accessToken) {
     shellAuthGeneration += 1;
     if (accessToken) {
+      // The agentia host has no revalidation/principal protocol: principal stays undefined,
+      // so the shell-only proven-principal guard in adoptShellSession does not apply here.
       void adoptShellSession(accessToken);
       return;
     }
@@ -1014,10 +1019,27 @@ const disposeEmbedHost = installEmbedHost({
   },
 });
 
-async function adoptShellSession(accessToken: string): Promise<void> {
+async function adoptShellSession(accessToken: string, principal?: string | null): Promise<void> {
   const generation = shellAuthGeneration;
   const resuming = revalidationPending;
   revalidationPending = false;
+  // A revalidation ends only on a credential the shell has proven for this same user.
+  // If its cross-tab proof failed the shell still pushes the stored token, unproven
+  // (principal null): that must not resume the old view — fail closed as a sign-out.
+  if (resuming && principal !== undefined && (principal === null || principal !== session.value?.uid)) {
+    // Only an UNPROVEN credential is blocked from coming straight back; a token proven for
+    // another user (an account switch in another tab) signs in normally after the teardown.
+    if (principal === null) unprovenRejected = { token: accessToken };
+    shellSignedOut();
+    return;
+  }
+  // The shell delivers every intent twice: the second copy of that same unproven token
+  // must not sign in afresh. Any proven principal lifts it: the old view is already torn
+  // down, so a proven identity (same user or not) is an ordinary sign-in.
+  if (unprovenRejected && accessToken === unprovenRejected.token && (principal === undefined || principal === null)) {
+    return;
+  }
+  unprovenRejected = undefined;
   if (session.value?.jwt === accessToken && !resuming) return;
   // Same user (the routine renewal): swap the login token, keep the socket and its IM token.
   // If WuKongIM ever rejects that token, remintConnectToken mints from this fresh session.jwt.

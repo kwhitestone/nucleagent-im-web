@@ -52,6 +52,8 @@ function fixture(state = "connected") {
     viewGeneration: 0, streamAbort: undefined, directoryEpoch: 0,
     directoryReading: undefined, directoryTimer: undefined, pendingConversationTarget: null,
     shellBridge: { reportAuthRequired: noop },
+    shellSignedOut: () => { calls.push("signed-out"); context.session.value = undefined; },
+    clearCachedContacts: noop, clearCachedProfile: noop, signInViaShell: noop,
   };
   for (const name of [
     "managementOpen", "canManageAgents", "conversations", "groups", "directoryAgents",
@@ -64,7 +66,8 @@ function fixture(state = "connected") {
   return {
     context, calls, pending, run,
     status: (status: number) => run(`connectStatusListener(${status}, 2)`),
-    adopt: (token: string) => run(`adoptShellSession(${JSON.stringify(token)})`),
+    adopt: (token: string, principal?: string | null) =>
+      run(`adoptShellSession(${JSON.stringify(token)}${principal === undefined ? "" : ", " + JSON.stringify(principal)})`),
   };
 }
 
@@ -355,4 +358,80 @@ test("sign-out during an in-flight same-user re-mint does not revive the old ses
   assert.equal(f.context.session.value, undefined);
   assert.equal(f.calls.filter((c) => c === "connect").length, 0);
   assert.equal(f.calls.filter((c) => c.startsWith("stream:")).length, 0);
+});
+
+// MUYU-161 (real DEV trace 2026-10-27 07:59): when the shell's cross-tab proof fails it still
+// pushes the stored token with principal:null. That unproven credential must not resume the
+// revalidated view; a proven same-user token does.
+test("revalidation ending on an UNPROVEN token (principal null) signs out instead of resuming", async () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  await f.adopt(jwt(2), null);
+  assert.ok(f.calls.includes("signed-out"));
+  assert.equal(f.pending.length, 0, "no mint on an unproven credential");
+  assert.equal(f.calls.filter((c) => c === "connect").length, 0);
+});
+
+test("revalidation ending on a token proven for ANOTHER user signs out instead of resuming", async () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  await f.adopt(jwt(2), "22");
+  assert.ok(f.calls.includes("signed-out"));
+  assert.equal(f.pending.length, 0);
+});
+
+test("revalidation ending on a token proven for the same user resumes", async () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  const resume = f.adopt(jwt(2), "11");
+  f.pending[0].resolve(envelope(jwt(2)));
+  await resume;
+  assert.ok(!f.calls.includes("signed-out"));
+  assert.ok(f.calls.includes("connect"));
+  assert.equal(f.context.draft.value, "unsent draft");
+});
+
+test("the duplicate copy of the same UNPROVEN token does not sign in afresh", async () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  await f.adopt(jwt(2), null);
+  await f.adopt(jwt(2), null);   // the shell's second delivery
+  await f.adopt(jwt(2));         // and without a principal field
+  assert.equal(f.pending.length, 0, "never minted on the unproven credential");
+  assert.equal(f.calls.filter((c) => c === "connect").length, 0);
+});
+
+test("after an unproven rejection, the same token proven for the same user signs in", async () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  await f.adopt(jwt(2), null);
+  const proven = f.adopt(jwt(2), "11");
+  assert.equal(f.pending.length, 1, "a proven principal lifts the block");
+  f.pending[0].resolve(envelope(jwt(2)));
+  await proven;
+  assert.equal(f.context.session.value?.uid, "11", "signed in on the proven credential");
+});
+
+test("a revalidation ending on another user's PROVEN token tears down, then that user signs in", async () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  await f.adopt(jwt(2, 22), "22");
+  assert.ok(f.calls.includes("signed-out"));
+  const again = f.adopt(jwt(2, 22), "22"); // the shell's duplicate delivery
+  assert.equal(f.pending.length, 1, "an account switch is not blocked");
+  f.pending[0].resolve(envelope(jwt(2, 22), "22"));
+  await again;
+  assert.equal(f.context.session.value?.uid, "22");
+});
+
+test("a different token clears the unproven block", async () => {
+  const f = fixture();
+  f.run("revalidationPending = true");
+  await f.adopt(jwt(2), null);
+  const fresh = f.adopt(jwt(3), null); // e.g. a later real sign-in pushes a new token
+  assert.equal(f.pending.length, 1);
+  assert.equal(f.run("unprovenRejected"), undefined);
+  f.pending[0].resolve(envelope(jwt(3)));
+  await fresh;
+  assert.equal(f.context.session.value?.uid, "11");
 });

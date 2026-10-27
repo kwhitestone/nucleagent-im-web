@@ -371,3 +371,22 @@ test("account switch (regression guard, held by the version order, not the new b
     assert.deepEqual(received, ["user-a", null, "user-b"]);
   });
 });
+
+// End to end through the real bridge with the real DEV sequence of a FAILED cross-tab proof
+// (2026-10-27 07:59): revalidation ×2, then the unproven stored token (principal null) ×2.
+test("failed shell proof: the bridge surfaces the unproven token with principal null", () => {
+  withFramedWindow((frame) => {
+    const received: Array<{ token: string | null; revalidating?: true; principal?: string | null }> = [];
+    installShellBridge({ onAuth: (intent) => received.push(intent) });
+    const send = (payload: unknown) => frame.deliver({ source: frame.parent, origin: shellOrigin, data: hostEnvelope("auth", payload) });
+    frame.deliver({ source: frame.parent, origin: shellOrigin, data: hostEnvelope("host:init", undefined) });
+    send({ ...authPayload({ sessionVersion: 2171, token: "proven" }), principal: { id: "11" } });
+    const reval = { source: "shell", type: "auth", token: null, sessionVersion: 2172, principal: null, permissions: [], revalidation: { previousVersion: 2171 } };
+    send(reval); send(reval);
+    const unproven = { source: "shell", type: "auth", token: "stored", sessionVersion: 2172, principal: null };
+    send(unproven); send(unproven);
+    assert.deepEqual(received.map((x) => [x.token, !!x.revalidating, x.principal]), [
+      ["proven", false, "11"], [null, true, undefined], ["stored", false, null], ["stored", false, null],
+    ]);
+  });
+});
