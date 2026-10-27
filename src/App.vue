@@ -845,8 +845,15 @@ function returnToConflict(): void {
 // MUYU-161 D12: a yielded tab whose probe budget was spent against a rival in another browser
 // never looked again (PRE r33: the rival left, the network dropped and came back, the tab stayed
 // yielded). The network coming back or the tab becoming visible re-arms the bounded budget.
+let lastRearmAt = -Infinity;
 function rearmProbe(): void {
   if (!session.value || connection.value !== "conflict" || revalidationPending) return;
+  // Only a SPENT budget is re-armed (a running round keeps its own schedule), and at most once
+  // per conflict window, so switching windows back and forth cannot drive repeated mints.
+  if (probesUsed < PROBE_DELAYS_MS.length) return;
+  const now = monotonicNow();
+  if (now - lastRearmAt < CONFLICT_WINDOW_MS) return;
+  lastRearmAt = now;
   probesUsed = 0;
   scheduleProbe();
 }
@@ -1851,6 +1858,7 @@ function teardownSession(): void {
   probesUsed = 0;
   probing = false;
   remintTransportFailed = false;
+  lastRearmAt = -Infinity;
   peers.clear();
   viewGeneration += 1;
   streamAbort?.abort();

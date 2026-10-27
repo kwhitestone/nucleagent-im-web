@@ -99,9 +99,9 @@ export interface ConnectionConflict {
  * channel who holds the connection, so a throttled background holder still answers in time.
  * Limits (bounded): tabs in different browsers (or storage partitions) cannot hear each other;
  * there only the jitter and the budget (PROBE_DELAYS_MS.length probes per streak) bound it, and if their probes keep
- * colliding both end yielded with "use here" offered. A spent budget is re-armed only by the
- * network coming back (`online`) or the tab becoming visible again: the rival's state is then
- * unknown, and both are rare, user-driven events (no timer-driven endless probing). A long-lived
+ * colliding both end yielded with "use here" offered. A SPENT budget is re-armed only by the
+ * network coming back (`online`) or the tab becoming visible again, at most once per conflict
+ * window (30 s): one more bounded round per such event, never timer-driven endless probing. A long-lived
  * winner in the other browser is then interrupted at most once per probe (about 5 s each, at most
  * PROBE_DELAYS_MS.length per streak) and takes the
  * connection back by its ordinary single re-mint. Channel messages carry no credential;

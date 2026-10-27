@@ -42,6 +42,7 @@ function fixture(state = "connected", opts: { channel?: unknown; random?: () => 
     BroadcastChannel: opts.channel,
     window: { addEventListener() {}, removeEventListener() {} },
     document: { visibilityState: "visible", addEventListener() {}, removeEventListener() {} },
+    lastRearmAt: -Infinity,
     Math: Object.assign(Object.create(Math), { random: opts.random ?? (() => 0.5) }),
     crypto: { randomUUID: () => `tab-${++tabSeq}` },
     clock: 1_000_000,
@@ -1345,4 +1346,74 @@ test("D12: a re-armed budget is still bounded (the rival keeps winning)", async 
   }
   assert.equal(f.pending.length - n, PROBE_DELAYS_MS.length, "one more bounded round, no endless probing");
   assert.equal(probeTimers(f).length, 0);
+});
+
+
+// D12 review follow-ups.
+test("D12 review: re-arm only once the budget is spent; a running round keeps its schedule", async () => {
+  const f = fixture();
+  await yieldLikeTrace(f);
+  const armed = probeTimers(f)[0];
+  f.run("rearmProbe()");
+  assert.equal(probeTimers(f)[0], armed, "partial budget: no reset of the armed probe");
+});
+
+test("D12 review: repeated visibility flips re-arm at most once per conflict window", async () => {
+  const f = fixture();
+  await spendBudget(f);
+  f.run("rearmWhenVisible()");
+  const first = probeTimers(f)[0];
+  assert.ok(first);
+  // The re-armed round is spent again quickly (rival keeps winning)...
+  for (let i = 0; i < PROBE_DELAYS_MS.length; i++) { if (!fireProbe(f)) break; f.pending.at(-1)!.resolve(envelope(jwt(1))); await flush(); await displaced(f, 2_000); }
+  const n = f.pending.length;
+  f.run("lastRearmAt = performance.now()"); // a re-arm just happened
+  f.run("rearmWhenVisible()");
+  assert.equal(probeTimers(f).length, 0, "throttled");
+  f.context.clock += CONFLICT_WINDOW_MS + 1;
+  f.run("rearmWhenVisible()");
+  assert.ok(probeTimers(f).length, "allowed again after the window");
+  assert.equal(f.pending.length, n);
+});
+
+test("D12 review: after a re-arm, a live same-browser holder still blocks the probe", async () => {
+  const C = bus();
+  const f = fixture("connected", { channel: C });
+  await spendBudget(f); // spent against a rival in another browser (not on this channel)
+  const holder = fixture("connected", { channel: C }); // a same-browser tab now holds it
+  holder.status(CONNECTED);
+  const n = f.pending.length;
+  f.run("rearmProbe()");
+  fireProbe(f);
+  assert.equal(f.pending.length, n, "no mint over a live holder");
+});
+
+test("D12 review: a re-armed probe while offline waits without spending budget", async () => {
+  const f = fixture();
+  await spendBudget(f);
+  onlineState = false;
+  f.run("rearmProbe()");
+  const n = f.pending.length;
+  fireProbe(f);
+  assert.equal(f.pending.length, n);
+  assert.equal(f.run("probesUsed"), 0);
+  onlineState = true;
+});
+
+test("D12 review: no re-arm while connecting, probing or authFailed", async () => {
+  for (const state of ["connecting", "authFailed", "connected", "disconnected"]) {
+    const f = fixture();
+    await spendBudget(f);
+    f.context.connection.value = state;
+    f.run("rearmProbe()");
+    assert.equal(probeTimers(f).length, 0, state);
+  }
+});
+
+test("D12 review: App registers and removes the online / visibility re-arm listeners", () => {
+  const app = readFileSync(new URL("../src/App.vue", import.meta.url), "utf8");
+  assert.match(app, /window\.addEventListener\("online", rearmProbe\)/);
+  assert.match(app, /document\.addEventListener\("visibilitychange", rearmWhenVisible\)/);
+  assert.match(app, /window\.removeEventListener\("online", rearmProbe\)/);
+  assert.match(app, /document\.removeEventListener\("visibilitychange", rearmWhenVisible\)/);
 });
