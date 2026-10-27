@@ -873,7 +873,14 @@ function rearmProbe(): void {
       // back still recovers without another event.
       lastRearmAt = now;
       clearTimeout(probeTimer);
-      probeTimer = setTimeout(() => { lastRearmAt = -Infinity; rearmProbe(); }, wait);
+      // If it comes due during a revalidation, look again later rather than give up (a revalidation
+      // that leaves the tab yielded cannot arm a spent budget by itself).
+      const fire = () => {
+        if (revalidationPending) { probeTimer = setTimeout(fire, PEER_FRESH_MS); return; }
+        lastRearmAt = -Infinity;
+        rearmProbe();
+      };
+      probeTimer = setTimeout(fire, wait);
       return;
     }
     probesUsed = 0;

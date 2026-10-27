@@ -1515,27 +1515,55 @@ test("D13 review: the connection bar exposes only the two counters, and only whi
 });
 
 
-test("D13 review 2: an online event too early for a new round is deferred to the round boundary, not dropped", async () => {
-  const f = fixture();
+
+/** Realistic path to "spent before the round boundary": 4 probes on their own schedule, then an online
+ * event pulls the 5th forward; the rival wins every time. Returns the round start. Clock only moves forward. */
+async function spendWithPull(f: ReturnType<typeof fixture>) {
   await yieldLikeTrace(f);
-  f.run("rearmProbe()"); // pull the first probe forward, then spend the round quickly
-  for (let i = 0; i < PROBE_DELAYS_MS.length; i++) {
-    if (!fireProbe(f)) break;
-    const p = f.pending.at(-1) as any; if (p && !p.done) { p.done = true; p.resolve(envelope(jwt(1))); await flush(); await displaced(f, 2_000); }
-  }
+  const win = async () => { const p = f.pending.at(-1) as any; if (p && !p.done) { p.done = true; p.resolve(envelope(jwt(1))); await flush(); await displaced(f, 2_000); } };
+  for (let i = 0; i < PROBE_DELAYS_MS.length - 1; i++) { fireProbe(f); await win(); }
+  f.run("rearmProbe()"); // pull the last (long) probe forward
+  fireProbe(f); await win();
   assert.equal(f.run("probesUsed"), PROBE_DELAYS_MS.length);
   const started = f.run("roundStartedAt");
-  f.context.clock = Math.max(f.context.clock, started + CONFLICT_WINDOW_MS + 1);
-  if (f.context.clock - started >= PROBE_DELAYS_MS.at(-1)) return; // round already long enough: nothing to defer
+  assert.ok(f.context.clock - started < PROBE_DELAYS_MS.at(-1) - CONFLICT_WINDOW_MS - 1, `spent ${f.context.clock - started} ms after the round began`);
+  f.context.clock += CONFLICT_WINDOW_MS + 1; // the next event is allowed by the 30 s throttle, still before the boundary
+  return started;
+}
+
+test("D13 review 2: an online event too early for a new round is deferred to the round boundary, not dropped", async () => {
+  const f = fixture();
+  const started = await spendWithPull(f);
   f.run("rearmProbe()"); // the network came back, but too early for a new round
   const deferred = probeTimers(f)[0];
   assert.ok(deferred, "deferred, not dropped");
   assert.ok(Math.abs(deferred.due - (started + PROBE_DELAYS_MS.at(-1))) < 2, "due at the round boundary");
   const n = f.pending.length;
-  f.context.clock = deferred.due; deferred.fired = true; deferred.fn(); // boundary reached, no new event
+  f.context.clock = deferred.due; deferred.fired = true; deferred.fn();
   fireProbe(f);
   assert.equal(f.pending.length, n + 1, "the new round starts by itself");
   f.pending.at(-1)!.resolve(envelope(jwt(1))); await flush();
   f.status(CONNECTED);
   assert.equal(f.context.connection.value, "connected");
+});
+
+test("D13 NIT1: a deferred new round that comes due during a revalidation is retried, not dropped", async () => {
+  const f = fixture();
+  await spendWithPull(f);
+  f.run("rearmProbe()");
+  const deferred = probeTimers(f)[0];
+  assert.ok(deferred);
+  f.run("revalidationPending = true");
+  const n0 = f.pending.length;
+  f.context.clock = deferred.due; deferred.fired = true; deferred.fn();
+  assert.equal(f.pending.length, n0, "no mint during the revalidation");
+  f.run("revalidationPending = false");
+  await f.adopt(jwt(2), "11"); // the revalidation ends with the tab still yielded
+  assert.equal(f.context.connection.value, "conflict");
+  const retry = probeTimers(f)[0];
+  assert.ok(retry, "still armed after the revalidation (0 before this fix)");
+  const n = f.pending.length;
+  f.context.clock = retry.due; retry.fired = true; retry.fn();
+  fireProbe(f);
+  assert.equal(f.pending.length, n + 1, "the new round probes by itself");
 });
