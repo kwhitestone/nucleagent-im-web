@@ -52,6 +52,7 @@ function fixture(state = "connected") {
     viewGeneration: 0, streamAbort: undefined, directoryEpoch: 0,
     directoryReading: undefined, directoryTimer: undefined, pendingConversationTarget: null,
     shellBridge: { reportAuthRequired: noop },
+    navigator: { get onLine() { return onlineState; } },
     shellSignedOut: () => { calls.push("signed-out"); context.session.value = undefined; },
     clearCachedContacts: noop, clearCachedProfile: noop, signInViaShell: noop,
   };
@@ -271,7 +272,7 @@ test("a server refusal of the re-mint is not retried on a timer (fail-closed, no
   const f = fixture();
   f.run("revalidationPending = true");
   const resume = f.adopt(jwt(2));
-  f.pending[0].reject(new Error("401 unauthorized"));
+  f.pending[0].reject(Object.assign(new Error("unauthorized"), { status: 401 })); // a real refusal carries the HTTP status
   await resume;
   assert.equal(f.context.timers.filter((t: any) => !t.cleared && t.ms === 2000).length, 0);
   assert.equal(f.pending.length, 1);
@@ -360,16 +361,99 @@ test("sign-out during an in-flight same-user re-mint does not revive the old ses
   assert.equal(f.calls.filter((c) => c.startsWith("stream:")).length, 0);
 });
 
-// MUYU-161 (real DEV trace 2026-10-27 07:59): when the shell's cross-tab proof fails it still
-// pushes the stored token with principal:null. That unproven credential must not resume the
-// revalidated view; a proven same-user token does.
-test("revalidation ending on an UNPROVEN token (principal null) signs out instead of resuming", async () => {
+// MUYU-161 (real DEV traces 2026-10-27 07:59 and 09:09): when the shell's cross-tab proof
+// fails it still pushes the stored token with principal null. ONLINE that means the server
+// refused it: fail closed. OFFLINE it proves nothing: the IM server proves it once back online.
+let onlineState = true;
+const setOnline = (on: boolean) => { onlineState = on; };
+const refusal = () => Object.assign(new Error("unauthorized"), { status: 401 });
+
+test("ONLINE: revalidation ending on an UNPROVEN token signs out; its duplicate cannot sign in", async () => {
+  setOnline(true);
   const f = fixture();
   f.run("revalidationPending = true");
   await f.adopt(jwt(2), null);
   assert.ok(f.calls.includes("signed-out"));
-  assert.equal(f.pending.length, 0, "no mint on an unproven credential");
+  await f.adopt(jwt(2), null); // the shell's second delivery
+  await f.adopt(jwt(2));       // and a copy without the field
+  assert.equal(f.pending.length, 0, "never minted on the unproven credential");
   assert.equal(f.calls.filter((c) => c === "connect").length, 0);
+});
+
+test("OFFLINE: an UNPROVEN token keeps the view, no stream, until the server proves it", async () => {
+  setOnline(false);
+  const f = fixture();
+  const channel = f.context.activeChannel.value;
+  f.run("revalidationPending = true");
+  const resume = f.adopt(jwt(2), null);
+  assert.ok(!f.calls.includes("signed-out"));
+  assert.equal(f.calls.filter((c) => c.startsWith("stream:")).length, 0, "no stream before the proof");
+  assert.equal(f.pending.length, 1, "the server is asked to prove the credential");
+  f.pending[0].resolve(envelope(jwt(2)));
+  await resume;
+  assert.ok(f.calls.includes("connect"));
+  assert.ok(f.calls.includes("stream:kept-channel"), "stream resumes only after the proof");
+  assert.equal(f.context.draft.value, "unsent draft");
+  assert.equal(f.context.activeChannel.value, channel);
+  setOnline(true);
+});
+
+test("OFFLINE then refused (401) signs out; a 5xx or bad gateway is retried, not a refusal", async () => {
+  setOnline(false);
+  const f = fixture();
+  f.run("revalidationPending = true");
+  const resume = f.adopt(jwt(2), null);
+  f.pending[0].reject(Object.assign(new Error("Bad gateway"), { status: 502 }));
+  await resume;
+  assert.ok(!f.calls.includes("signed-out"), "5xx is not a refusal");
+  const retry = f.context.timers.filter((t: any) => !t.cleared).at(-1);
+  retry.fn();
+  f.pending[1].reject(refusal());
+  await flush();
+  assert.ok(f.calls.includes("signed-out"));
+  assert.equal(f.calls.filter((c) => c === "connect").length, 0);
+  assert.equal(f.calls.filter((c) => c.startsWith("stream:")).length, 0);
+  setOnline(true);
+});
+
+test("OFFLINE: the server resolving the token to ANOTHER uid signs out", async () => {
+  setOnline(false);
+  const f = fixture();
+  f.run("revalidationPending = true");
+  const resume = f.adopt(jwt(2), null);
+  f.pending[0].resolve(envelope(jwt(2), "22"));
+  await resume;
+  assert.ok(f.calls.includes("signed-out"));
+  assert.equal(f.calls.filter((c) => c === "connect").length, 0);
+  setOnline(true);
+});
+
+test("OFFLINE: transport failure keeps waiting; coming back online proves and resumes", async () => {
+  setOnline(false);
+  const f = fixture();
+  f.run("revalidationPending = true");
+  const resume = f.adopt(jwt(2), null);
+  f.pending[0].reject(new TypeError("Failed to fetch"));
+  await resume;
+  assert.ok(!f.calls.includes("signed-out"));
+  setOnline(true);
+  f.run("remintWhenOnline()");
+  f.pending[1].resolve(envelope(jwt(2)));
+  await flush();
+  assert.ok(f.calls.includes("connect"));
+  assert.ok(f.calls.includes("stream:kept-channel"));
+});
+
+test("a refusal arriving after a NEW revalidation started does not sign out", async () => {
+  setOnline(false);
+  const f = fixture();
+  f.run("revalidationPending = true");
+  const resume = f.adopt(jwt(2), null);
+  f.run("revalidationPending = true");
+  f.pending[0].reject(refusal());
+  await resume;
+  assert.ok(!f.calls.includes("signed-out"));
+  setOnline(true);
 });
 
 test("revalidation ending on a token proven for ANOTHER user signs out instead of resuming", async () => {
@@ -391,47 +475,60 @@ test("revalidation ending on a token proven for the same user resumes", async ()
   assert.equal(f.context.draft.value, "unsent draft");
 });
 
-test("the duplicate copy of the same UNPROVEN token does not sign in afresh", async () => {
+test("teardown clears a pending server proof", async () => {
+  setOnline(false);
   const f = fixture();
   f.run("revalidationPending = true");
-  await f.adopt(jwt(2), null);
-  await f.adopt(jwt(2), null);   // the shell's second delivery
-  await f.adopt(jwt(2));         // and without a principal field
-  assert.equal(f.pending.length, 0, "never minted on the unproven credential");
-  assert.equal(f.calls.filter((c) => c === "connect").length, 0);
-});
-
-test("after an unproven rejection, the same token proven for the same user signs in", async () => {
-  const f = fixture();
-  f.run("revalidationPending = true");
-  await f.adopt(jwt(2), null);
-  const proven = f.adopt(jwt(2), "11");
-  assert.equal(f.pending.length, 1, "a proven principal lifts the block");
+  const resume = f.adopt(jwt(2), null);
+  f.run("teardownSession()");
   f.pending[0].resolve(envelope(jwt(2)));
-  await proven;
-  assert.equal(f.context.session.value?.uid, "11", "signed in on the proven credential");
+  await resume;
+  assert.equal(f.run("proofUid"), undefined);
+  assert.equal(f.calls.filter((c) => c === "connect").length, 0);
+  setOnline(true);
 });
 
-test("a revalidation ending on another user's PROVEN token tears down, then that user signs in", async () => {
+test("OFFLINE: a duplicate or field-less copy of the unproven token keeps the proof pending; 401 still signs out", async () => {
+  setOnline(false);
   const f = fixture();
   f.run("revalidationPending = true");
-  await f.adopt(jwt(2, 22), "22");
+  const resume = f.adopt(jwt(2), null);
+  await f.adopt(jwt(2), null); // the shell's second delivery
+  await f.adopt(jwt(2));       // a copy without the principal field
+  assert.notEqual(f.run("proofUid"), undefined, "the pending proof survives duplicates");
+  f.pending[0].reject(Object.assign(new Error("unauthorized"), { status: 401 }));
+  await resume;
   assert.ok(f.calls.includes("signed-out"));
-  const again = f.adopt(jwt(2, 22), "22"); // the shell's duplicate delivery
-  assert.equal(f.pending.length, 1, "an account switch is not blocked");
-  f.pending[0].resolve(envelope(jwt(2, 22), "22"));
-  await again;
-  assert.equal(f.context.session.value?.uid, "22");
+  assert.equal(f.calls.filter((c) => c === "connect").length, 0);
+  assert.equal(f.calls.filter((c) => c.startsWith("stream:")).length, 0);
+  setOnline(true);
 });
 
-test("a different token clears the unproven block", async () => {
+test("a 401 gateway page (invalid JSON) is a refusal, not a transport retry", async () => {
+  setOnline(false);
   const f = fixture();
   f.run("revalidationPending = true");
-  await f.adopt(jwt(2), null);
-  const fresh = f.adopt(jwt(3), null); // e.g. a later real sign-in pushes a new token
-  assert.equal(f.pending.length, 1);
-  assert.equal(f.run("unprovenRejected"), undefined);
-  f.pending[0].resolve(envelope(jwt(3)));
-  await fresh;
-  assert.equal(f.context.session.value?.uid, "11");
+  const resume = f.adopt(jwt(2), null);
+  f.pending[0].reject(Object.assign(new Error("Server returned invalid JSON (401)"), { status: 401 }));
+  await resume;
+  assert.ok(f.calls.includes("signed-out"));
+  setOnline(true);
+});
+
+test("OFFLINE proof pending, then the shell's PROVEN same-user token completes it with the stream", async () => {
+  setOnline(false);
+  const f = fixture();
+  f.run("revalidationPending = true");
+  const first = f.adopt(jwt(2), null);
+  f.pending[0].reject(new TypeError("Failed to fetch"));
+  await first;
+  setOnline(true);
+  const proven = f.adopt(jwt(3), "11");
+  assert.equal(f.run("proofUid"), undefined);
+  f.pending.at(-1)!.resolve(envelope(jwt(3)));
+  await proven;
+  await flush();
+  assert.ok(f.calls.includes("connect"));
+  assert.ok(f.calls.includes("stream:kept-channel"));
+  assert.equal(f.context.draft.value, "unsent draft");
 });

@@ -68,14 +68,18 @@ async function readJson(response: Response): Promise<unknown> {
   try {
     return text ? JSON.parse(text) : {};
   } catch {
-    throw new Error(`Server returned invalid JSON (${response.status})`);
+    const error = new Error(`Server returned invalid JSON (${response.status})`) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
   }
 }
 
 async function readEnvelope<T>(response: Response): Promise<T> {
   const body = await readJson(response) as Partial<Envelope<T>> & { detail?: string };
   if (!response.ok || body.code !== 0 || body.data === undefined) {
-    throw new Error(body.message || body.detail || `Request failed (${response.status})`);
+    const error = new Error(body.message || body.detail || `Request failed (${response.status})`) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
   }
   return body.data;
 }

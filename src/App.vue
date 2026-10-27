@@ -713,8 +713,11 @@ let authRecoveryNeeded = false;
 const SHELL_REVALIDATION_MS = 12_000;
 let revalidationTimer: ReturnType<typeof setTimeout> | undefined;
 let revalidationPending = false;
-// The token a revalidation ended on without the shell's proof (see adoptShellSession).
-// teardownSession must NOT clear it: shellSignedOut sets it and then tears down.
+// Set while an unproven revalidation token (pushed while offline) awaits the IM server's
+// proof: the uid the re-mint must return for the view to resume. No stream meanwhile.
+let proofUid: string | undefined;
+// An unproven token refused while online (see adoptShellSession). teardownSession must
+// NOT clear it: shellSignedOut sets it and then tears down.
 let unprovenRejected: { token: string } | undefined;
 // A re-mint that failed in transport (offline) is retried: by then the SDK socket is
 // closed with reconnect off, so nothing else would bring the connection back. Bounded,
@@ -1021,25 +1024,32 @@ const disposeEmbedHost = installEmbedHost({
 
 async function adoptShellSession(accessToken: string, principal?: string | null): Promise<void> {
   const generation = shellAuthGeneration;
-  const resuming = revalidationPending;
+  // A proof still pending (unproven token, offline) is also a resume: a proven token for
+  // this same user completes it (re-mint, reconnect, reopen the stream).
+  const resuming = revalidationPending || (proofUid !== undefined && typeof principal === "string");
   revalidationPending = false;
-  // A revalidation ends only on a credential the shell has proven for this same user.
-  // If its cross-tab proof failed the shell still pushes the stored token, unproven
-  // (principal null): that must not resume the old view — fail closed as a sign-out.
-  if (resuming && principal !== undefined && (principal === null || principal !== session.value?.uid)) {
-    // Only an UNPROVEN credential is blocked from coming straight back; a token proven for
-    // another user (an account switch in another tab) signs in normally after the teardown.
+  // A revalidation ends on a proven credential. If the shell's cross-tab proof failed it
+  // still pushes the stored token, unproven (principal null):
+  //  - while ONLINE the proof failure means the server refused it (revoked/expired): fail
+  //    closed as a sign-out, and the duplicate copy of that token cannot sign in afresh;
+  //  - while OFFLINE the failure proves nothing: keep the view without socket or stream and
+  //    let the IM server prove the token once back online — resume only on this same uid,
+  //    sign out on a refusal (401/403) or another uid (see remintOnce).
+  // A token proven for another user is an account switch: tear the old view down.
+  const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  if (resuming && principal !== undefined && principal !== session.value?.uid && (principal !== null || !offline)) {
     if (principal === null) unprovenRejected = { token: accessToken };
     shellSignedOut();
     return;
   }
-  // The shell delivers every intent twice: the second copy of that same unproven token
-  // must not sign in afresh. Any proven principal lifts it: the old view is already torn
-  // down, so a proven identity (same user or not) is an ordinary sign-in.
   if (unprovenRejected && accessToken === unprovenRejected.token && (principal === undefined || principal === null)) {
     return;
   }
   unprovenRejected = undefined;
+  const serverProof = resuming && principal === null;
+  // Only a credential the shell PROVED for a user ends a pending server proof; a duplicate
+  // or field-less copy of the unproven token must leave it (and its 401 sign-out) in force.
+  if (typeof principal === "string") proofUid = undefined;
   if (session.value?.jwt === accessToken && !resuming) return;
   // Same user (the routine renewal): swap the login token, keep the socket and its IM token.
   // If WuKongIM ever rejects that token, remintConnectToken mints from this fresh session.jwt.
@@ -1051,13 +1061,15 @@ async function adoptShellSession(accessToken: string, principal?: string | null)
     // Mark a resume as pending recovery so a failed re-mint retries on the next
     // renewal instead of leaving the view stuck (Connected clears it).
     if (resuming) authRecoveryNeeded = true;
+    if (serverProof) proofUid = session.value.uid;
     remintRetries = 0; // a new credential earns a fresh, still bounded, retry budget
     const resumedUid = session.value.uid;
     if (authRecoveryNeeded) await remintConnectToken();
     // The shell delivers each intent twice, so the generation may have moved on by a
     // duplicate of this same token; what matters is that it is still this user's
     // session and no newer revalidation or sign-out has started.
-    if (resuming && session.value?.uid === resumedUid && !revalidationPending && activeChannel.value) {
+    if (resuming && session.value?.uid === resumedUid && !revalidationPending && proofUid === undefined &&
+      !serverProof && activeChannel.value) {
       startAgentStream(activeChannel.value, viewGeneration);
     }
     return;
@@ -1172,21 +1184,42 @@ async function remintOnce(): Promise<void> {
   const current = session.value;
   if (!current) return;
   clearTimeout(remintRetryTimer);
+  let proofPassed = false;
   try {
     const next = await imSession({ accessToken: current.jwt });
     if (session.value !== current || revalidationPending) return;
+    if (proofUid !== undefined) {
+      const expected = proofUid;
+      proofUid = undefined;
+      // The server resolved the unproven credential to another account: never resume
+      // the old view on it.
+      if (next.uid !== expected) { shellSignedOut(); return; }
+      proofPassed = true;
+    }
     remintRetries = 0;
     session.value = next;
     WKSDK.shared().disconnect(); // close the refused socket before the SDK opens a new one
     const sdk = configureSDK(next, () => session.value);
     connection.value = "connecting";
     sdk.connect();
+    // The open channel's stream waited for the server's proof (see adoptShellSession).
+    if (proofPassed && activeChannel.value) startAgentStream(activeChannel.value, viewGeneration);
   } catch (error) {
     // Keep recovery pending even if socket close has changed the displayed status.
     // A transport failure (offline, blip: fetch rejects with TypeError) is retried with
     // bounded backoff and on `online`; a server refusal is not — the next renewal retries that.
-    const name = (error as Error | undefined)?.name;
-    if ((name === "TypeError" || name === "TimeoutError" || name === "AbortError") && mayRemint(current) &&
+    // Only an explicit 401/403 is a refusal; 5xx, gateway pages and network errors are
+    // transport failures and are retried (bounded).
+    const status = (error as { status?: number } | undefined)?.status;
+    const refused = status === 401 || status === 403;
+    const transport = !refused;
+    // The server refused the unproven credential (revoked, expired): fail closed.
+    if (refused && proofUid !== undefined && session.value === current && !revalidationPending) {
+      proofUid = undefined;
+      shellSignedOut();
+      return;
+    }
+    if (transport && mayRemint(current) &&
       remintRetries < REMINT_RETRY_MS.length) {
       const delay = REMINT_RETRY_MS[remintRetries++];
       remintRetryTimer = setTimeout(() => {
@@ -1255,7 +1288,8 @@ function startAgentStream(channel: Channel, generation: number): void {
   streamAbort?.abort();
   liveResponses.value = [];
   streamConnection.value = "connected";
-  if (!session.value) return;
+  // No stream on an unproven credential (revalidation or server proof pending).
+  if (!session.value || revalidationPending || proofUid !== undefined) return;
 
   streamAbort = new AbortController();
   const streamSession = session.value;
@@ -1621,6 +1655,7 @@ async function groupChanged(): Promise<void> {
 }
 
 function teardownSession(): void {
+  proofUid = undefined;
   revalidationPending = false;
   clearTimeout(revalidationTimer);
   clearTimeout(remintRetryTimer);
