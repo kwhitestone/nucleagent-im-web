@@ -1513,3 +1513,29 @@ test("D13 review: the connection bar exposes only the two counters, and only whi
   assert.match(app, /:data-probes-used="connection === 'conflict' \? probeState\.used : undefined"/);
   assert.match(app, /:data-probe-budget="connection === 'conflict' \? probeState\.budget : undefined"/);
 });
+
+
+test("D13 review 2: an online event too early for a new round is deferred to the round boundary, not dropped", async () => {
+  const f = fixture();
+  await yieldLikeTrace(f);
+  f.run("rearmProbe()"); // pull the first probe forward, then spend the round quickly
+  for (let i = 0; i < PROBE_DELAYS_MS.length; i++) {
+    if (!fireProbe(f)) break;
+    const p = f.pending.at(-1) as any; if (p && !p.done) { p.done = true; p.resolve(envelope(jwt(1))); await flush(); await displaced(f, 2_000); }
+  }
+  assert.equal(f.run("probesUsed"), PROBE_DELAYS_MS.length);
+  const started = f.run("roundStartedAt");
+  f.context.clock = Math.max(f.context.clock, started + CONFLICT_WINDOW_MS + 1);
+  if (f.context.clock - started >= PROBE_DELAYS_MS.at(-1)) return; // round already long enough: nothing to defer
+  f.run("rearmProbe()"); // the network came back, but too early for a new round
+  const deferred = probeTimers(f)[0];
+  assert.ok(deferred, "deferred, not dropped");
+  assert.ok(Math.abs(deferred.due - (started + PROBE_DELAYS_MS.at(-1))) < 2, "due at the round boundary");
+  const n = f.pending.length;
+  f.context.clock = deferred.due; deferred.fired = true; deferred.fn(); // boundary reached, no new event
+  fireProbe(f);
+  assert.equal(f.pending.length, n + 1, "the new round starts by itself");
+  f.pending.at(-1)!.resolve(envelope(jwt(1))); await flush();
+  f.status(CONNECTED);
+  assert.equal(f.context.connection.value, "connected");
+});

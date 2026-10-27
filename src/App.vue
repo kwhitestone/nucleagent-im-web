@@ -862,10 +862,20 @@ function rearmProbe(): void {
   if (now - lastRearmAt < CONFLICT_WINDOW_MS) return;
   // D13: the network coming back or the tab becoming visible means the rival's state is unknown.
   // A spent budget starts a new bounded round, but no sooner than the longest delay after the last
-  // round began (so the rate never exceeds an undisturbed round's); a round still waiting is pulled
-  // forward to the first (short) delay at most ONCE per round. Each probe uses one budget slot.
+  // round began (so the rate never exceeds an undisturbed round's) — an event that comes too early
+  // defers the new round instead of being dropped; a round still waiting is pulled forward to the
+  // first (short) delay at most ONCE per round (a later event in the same round keeps its schedule,
+  // the price of the rate bound). Each probe uses one budget slot.
   if (probesUsed >= PROBE_DELAYS_MS.length) {
-    if (now - roundStartedAt < PROBE_DELAYS_MS[PROBE_DELAYS_MS.length - 1]) return;
+    const wait = roundStartedAt + PROBE_DELAYS_MS[PROBE_DELAYS_MS.length - 1] - now;
+    if (wait > 0) {
+      // Too early for a new round: defer it (never drop it), so a tab that heard the network come
+      // back still recovers without another event.
+      lastRearmAt = now;
+      clearTimeout(probeTimer);
+      probeTimer = setTimeout(() => { lastRearmAt = -Infinity; rearmProbe(); }, wait);
+      return;
+    }
     probesUsed = 0;
     pulledThisRound = false;
   }
