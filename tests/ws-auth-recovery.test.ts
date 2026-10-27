@@ -788,3 +788,47 @@ test("review 2: a stale refusal does not leak into a later takeover's outcome", 
   await flush(); await flush();
   assert.notEqual(f.context.connection.value, "authFailed");
 });
+
+// Review 2: both tabs re-mint at the same time (both pending). The server keeps only the LAST
+// registered token: a tab connects only while it holds it; otherwise its connect gets rc=2.
+for (const order of [["A", "B"], ["B", "A"]]) {
+  for (const connectFirst of [true, false]) {
+    test(`review 2: concurrent re-mints (register ${order.join("→")}, ${connectFirst ? "connect before" : "connect after"} the other registers) settle on one connected`, async () => {
+      const server = { owner: "" };
+      const tabs = Object.fromEntries(["A", "B"].map((n) => [n, fixture()]));
+      for (const f of Object.values(tabs)) f.context.clock = 1_000_000;
+      const kicked = (f: ReturnType<typeof fixture>) => {
+        f.context.clock += 3_400; f.status(DISCONNECT, 0); f.context.clock += 3_000; f.status(CONNECT_FAIL);
+      };
+      const tryConnect = (name: string) => {
+        const f = tabs[name];
+        if (server.owner === name) f.status(CONNECTED); else { f.context.clock += 100; f.status(CONNECT_FAIL); }
+      };
+      // Both had connected; a third party's mint kicked both at once, so both re-mint together.
+      for (const f of Object.values(tabs)) f.status(CONNECTED);
+      for (const f of Object.values(tabs)) kicked(f);
+      for (let round = 0; round < 10; round++) {
+        const minting = order.filter((n) => tabs[n].pending.length && !(tabs[n].pending.at(-1) as any).done);
+        if (!minting.length) break;
+        for (const n of minting) {
+          (tabs[n].pending.at(-1) as any).done = true;
+          const previous = server.owner;
+          server.owner = n; // registration
+          tabs[n].pending.at(-1)!.resolve(envelope(jwt(1)));
+          await flush();
+          if (connectFirst) tryConnect(n);
+          // The previous holder, if connected, is closed by the server; its reconnect fails.
+          if (previous && previous !== n && tabs[previous].context.connection.value === "connected") kicked(tabs[previous]);
+        }
+        if (!connectFirst) for (const n of minting) tryConnect(n);
+        for (const n of order) {
+          if (n !== server.owner && tabs[n].context.connection.value === "connected") kicked(tabs[n]);
+        }
+      }
+      const states = order.map((n) => tabs[n].context.connection.value);
+      assert.equal(states.filter((x) => x === "connected").length, 1, `exactly one connected: ${states}`);
+      assert.equal(tabs[server.owner].context.connection.value, "connected", "the token holder is the connected tab");
+      assert.ok(Object.values(tabs).reduce((n, f) => n + f.pending.length, 0) <= 4, "bounded mints");
+    });
+  }
+}
