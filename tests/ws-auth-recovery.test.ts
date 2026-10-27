@@ -5,7 +5,10 @@ import test from "node:test";
 import ts from "typescript";
 import { ref } from "vue";
 import { renewsSameUser } from "../src/api.ts";
-import { connectionConflict, remintGuard } from "../src/history.ts";
+import {
+  CONFLICT_WINDOW_MS, connectionConflict, isPeerReport, PEER_FRESH_MS, PEER_HEARTBEAT_MS, peerLiveness,
+  PROBE_DELAYS_MS, PROBE_JITTER, remintGuard,
+} from "../src/history.ts";
 
 const app = readFileSync(new URL("../src/App.vue", import.meta.url), "utf8");
 const section = (start: string, end: string) => app.slice(app.indexOf(start), app.indexOf(end));
@@ -21,7 +24,8 @@ const envelope = (accessToken: string, uid = "11") =>
   ({ uid, jwt: accessToken, token: "synthetic-im", wsAddr: "ws://fixture" });
 const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
 
-function fixture(state = "connected") {
+let tabSeq = 0;
+function fixture(state = "connected", opts: { channel?: unknown; random?: () => number } = {}) {
   const calls: string[] = [];
   const pending: { resolve: (value: ReturnType<typeof envelope>) => void; reject: (error: Error) => void }[] = [];
   const noop = () => {};
@@ -33,7 +37,11 @@ function fixture(state = "connected") {
     shellAuthGeneration: 1,
     renewsSameUser,
     remintGuard,
-    connectionConflict,
+    connectionConflict, CONFLICT_WINDOW_MS, isPeerReport, PEER_FRESH_MS, PEER_HEARTBEAT_MS, peerLiveness,
+    PROBE_DELAYS_MS, PROBE_JITTER,
+    BroadcastChannel: opts.channel,
+    Math: Object.assign(Object.create(Math), { random: opts.random ?? (() => 0.5) }),
+    crypto: { randomUUID: () => `tab-${++tabSeq}` },
     clock: 1_000_000,
     performance: { now: () => context.clock },
     ConnectStatus: { Connected: 1, Connecting: 2, ConnectFail: 3, Disconnect: 0 },
@@ -50,7 +58,7 @@ function fixture(state = "connected") {
     batch: { refreshHidden: noop, reset: noop }, agentDirectory: { clear: noop },
     removeListeners: noop, resetNames: noop,
     timers: [] as Array<{ fn: () => void; ms: number; cleared?: boolean }>,
-    setTimeout: (fn: () => void, ms: number) => { const t = { fn, ms }; context.timers.push(t); return t; },
+    setTimeout: (fn: () => void, ms: number) => { const t = { fn, ms, due: context.clock + ms }; context.timers.push(t); return t; },
     clearTimeout: (t?: { cleared?: boolean }) => { if (t) t.cleared = true; },
     viewGeneration: 0, streamAbort: undefined, directoryEpoch: 0,
     directoryReading: undefined, directoryTimer: undefined, pendingConversationTarget: null,
@@ -832,3 +840,246 @@ for (const order of [["A", "B"], ["B", "A"]]) {
     });
   }
 }
+
+// ---------------------------------------------------------------------------------------------
+// MUYU-161 D11 — real DEV trace twotab-dev run 1 (2026-10-27 11:26:43–11:27:02Z, both tabs on 9222):
+// B opens -> A displaced -> A re-mints -> B displaced -> B re-mints -> ... the server accepted two
+// concurrent connections and then closed both; A and B each saw two quick auth-fail losses and
+// BOTH yielded (30/30 samples "A=冲突 B=冲突") until the user clicked "use here" 74 s later.
+// Required: a bounded automatic recovery to exactly one connected tab, without displacing a tab
+// that holds the connection, and without weakening refusal / other-user fail-closed handling.
+// ---------------------------------------------------------------------------------------------
+
+/** One browser's BroadcastChannel bus (same-origin tabs hear each other; never their own posts). */
+function bus() {
+  const members = new Set<any>();
+  return class FakeChannel {
+    listeners: Array<(e: { data: unknown }) => void> = [];
+    constructor() { members.add(this); }
+    addEventListener(_: string, fn: (e: { data: unknown }) => void) { this.listeners.push(fn); }
+    postMessage(data: unknown) { for (const m of members) if (m !== this) m.listeners.forEach((fn: any) => fn({ data: structuredClone(data) })); }
+    close() { members.delete(this); }
+  };
+}
+
+/** Drive a tab into the yielded state exactly as the DEV trace did (two quick auth-fail losses). */
+async function yieldLikeTrace(f: ReturnType<typeof fixture>) {
+  for (let i = 0; i < 2; i++) await displaced(f, 2_000);
+  assert.equal(f.context.connection.value, "conflict");
+}
+const live = (f: ReturnType<typeof fixture>) => f.context.timers.filter((t: any) => !t.cleared && !t.fired);
+const fire = (t: any) => { t.fired = true; t.fn(); };
+/** The tab's own probe (or peer re-check) timer, if armed. */
+const probeTimers = (f: ReturnType<typeof fixture>) => { const t = f.run("probeTimer"); return t && !t.cleared && !t.fired ? [t] : []; };
+
+test("D11 DEV trace: a yielded tab recovers by itself (bounded probe), keeping draft and channel", async () => {
+  const f = fixture();
+  await yieldLikeTrace(f);
+  const before = f.pending.length;
+  const probe = probeTimers(f).at(-1);
+  assert.ok(probe, "a probe is scheduled after yielding");
+  assert.ok(probe.ms >= 6_000 && probe.ms <= 6_000 * 1.6, `first probe in [6 s, 9.6 s], got ${probe.ms}`);
+  fire(probe);
+  assert.equal(f.pending.length, before + 1, "the probe re-mints once");
+  f.pending.at(-1)!.resolve(envelope(jwt(1)));
+  await flush();
+  f.status(CONNECTED);
+  assert.equal(f.context.connection.value, "connected");
+  assert.equal(f.context.draft.value, "unsent draft");
+  assert.equal(f.context.activeChannel.value?.channelID, "kept-channel");
+});
+
+/**
+ * Two tabs against a one-connection server on one shared clock. Every armed timer of either tab
+ * fires in due order (probes, peer re-checks, heartbeats, stability); every mint either tab starts
+ * resolves, registers its token (displacing the previous holder: socket closed, reconnect rc=2).
+ */
+async function replay(tabs: Record<string, ReturnType<typeof fixture>>, minutes = 5) {
+  const server = { owner: "" };
+  const done = new Set<unknown>();
+  let mints = 0;
+  const settle = async () => {
+    for (let guard = 0; guard < 50; guard++) {
+      const next = Object.entries(tabs).map(([n, f]) => ({ n, f, p: f.pending.find((p) => !done.has(p)) })).find((x) => x.p);
+      if (!next) return;
+      done.add(next.p); mints += 1;
+      const previous = server.owner;
+      server.owner = next.n;
+      next.p!.resolve(envelope(jwt(1)));
+      await flush();
+      next.f.status(CONNECTED);
+      if (previous && previous !== next.n && tabs[previous].context.connection.value === "connected") {
+        for (const f of Object.values(tabs)) f.context.clock += 2_000;
+        tabs[previous].status(DISCONNECT, 0);
+        for (const f of Object.values(tabs)) f.context.clock += 3_000;
+        tabs[previous].status(CONNECT_FAIL);
+      }
+    }
+    throw new Error("unbounded displacement in replay");
+  };
+  for (const f of Object.values(tabs)) for (const p of f.pending) done.add(p);
+  const t0 = Math.max(...Object.values(tabs).map((f) => f.context.clock));
+  for (const f of Object.values(tabs)) f.context.clock = t0;
+  for (let step = 0; step < 2_000; step++) {
+    const next = Object.values(tabs).flatMap((f) => live(f).map((t: any) => ({ f, t }))).sort((x, y) => x.t.due - y.t.due)[0];
+    if (!next || next.t.due > t0 + minutes * 60_000) break;
+    const now = Math.max(next.t.due, ...Object.values(tabs).map((f) => f.context.clock));
+    for (const f of Object.values(tabs)) f.context.clock = now;
+    fire(next.t);
+    await settle();
+  }
+  return { owner: server.owner, mints };
+}
+
+for (const sameBrowser of [true, false]) {
+  test(`D11 DEV trace replay (${sameBrowser ? "same browser" : "two browsers, cannot hear each other"}): both yielded -> exactly one connected, bounded`, async () => {
+    for (const [ra, rb] of [[0.1, 0.9], [0.9, 0.1], [0.5, 0.5], [0, 0], [1, 1]]) {
+      const tabs: Record<string, ReturnType<typeof fixture>> = {
+        A: fixture("connected", { channel: sameBrowser ? bus() : undefined, random: () => ra }),
+        B: fixture("connected", { channel: undefined, random: () => rb }),
+      };
+      if (sameBrowser) { const C = bus(); tabs.A = fixture("connected", { channel: C, random: () => ra }); tabs.B = fixture("connected", { channel: C, random: () => rb }); }
+      for (const f of Object.values(tabs)) f.context.clock = 1_000_000;
+      for (const f of Object.values(tabs)) await yieldLikeTrace(f);
+      const { owner, mints } = await replay(tabs);
+      const states = Object.values(tabs).map((f) => f.context.connection.value).sort();
+      assert.deepEqual(states, ["conflict", "connected"], `random ${ra}/${rb}: ${states}`);
+      assert.equal(tabs[owner].context.connection.value, "connected", "the token holder is the connected tab");
+      assert.ok(mints <= 2 * PROBE_DELAYS_MS.length + 2, `bounded mints after both yielded: ${mints}`);
+    }
+  });
+}
+
+test("D11: a probe never displaces a same-browser tab that reports a live connection", async () => {
+  const Channel = bus();
+  const winner = fixture("connected", { channel: Channel });
+  const loser = fixture("connected", { channel: Channel });
+  winner.status(CONNECTED); // announces "connected"
+  await yieldLikeTrace(loser);
+  const before = loser.pending.length;
+  for (const t of probeTimers(loser)) fire(t);
+  assert.equal(loser.pending.length, before, "no mint while the peer holds the connection");
+  // The winner closes its tab: it releases, and the yielded tab takes over by itself.
+  winner.run("teardownSession()");
+  const re = probeTimers(loser).at(-1);
+  assert.ok(re, "the release re-arms a probe");
+  fire(re);
+  assert.equal(loser.pending.length, before + 1);
+});
+
+test("D11: a peer that vanished silently (crash) stops blocking once its report is stale", async () => {
+  const Channel = bus();
+  const winner = fixture("connected", { channel: Channel });
+  const loser = fixture("connected", { channel: Channel });
+  winner.status(CONNECTED);
+  await yieldLikeTrace(loser);
+  for (const t of probeTimers(loser)) fire(t); // blocked: schedules a re-check after PEER_FRESH_MS
+  const recheck = live(loser).find((t: any) => t.ms === PEER_FRESH_MS);
+  assert.ok(recheck, "a re-check is scheduled");
+  loser.context.clock += PEER_FRESH_MS + 1; // no heartbeat arrived meanwhile
+  fire(recheck);
+  const before = loser.pending.length;
+  for (const t of probeTimers(loser)) fire(t);
+  assert.equal(loser.pending.length, before + 1, "probes once the peer went quiet");
+});
+
+test("D11: automatic probes are bounded (cross-browser peer that keeps winning)", async () => {
+  const f = fixture();
+  await yieldLikeTrace(f);
+  let mints = f.pending.length;
+  for (let i = 0; i < 10; i++) {
+    const t = probeTimers(f).at(-1);
+    if (!t) break;
+    fire(t);
+    if (f.pending.length === mints) break;
+    mints = f.pending.length;
+    f.pending.at(-1)!.resolve(envelope(jwt(1)));
+    await flush();
+    await displaced(f, 2_000); // the other browser's tab takes it straight back
+  }
+  assert.equal(f.pending.length, 1 + PROBE_DELAYS_MS.length, "one trace re-mint + at most PROBE_DELAYS_MS.length probes");
+  assert.equal(f.context.connection.value, "conflict");
+  assert.ok(f.calls.length > 0);
+});
+
+test("D11: probe delays grow and carry jitter", async () => {
+  const delays: number[] = [];
+  const f = fixture("connected", { random: () => 1 });
+  await yieldLikeTrace(f);
+  for (let i = 0; i < 3; i++) {
+    const t = probeTimers(f).at(-1); delays.push(t.ms); fire(t);
+    f.pending.at(-1)!.resolve(envelope(jwt(1))); await flush();
+    await displaced(f, 2_000);
+  }
+  assert.deepEqual(delays, PROBE_DELAYS_MS.map((d: number) => d * (1 + PROBE_JITTER)));
+});
+
+test("D11: a probe refused by the server (401) does not loop and the bar leaves 正在重连", async () => {
+  const f = fixture();
+  await yieldLikeTrace(f);
+  fire(probeTimers(f).at(-1));
+  f.pending.at(-1)!.reject(Object.assign(new Error("unauthorized"), { status: 401 }));
+  await flush();
+  assert.equal(probeTimers(f).length, 0, "no further automatic probe after a refusal");
+  assert.equal(f.context.timers.filter((t: any) => !t.cleared && t.ms === 2000).length, 0, "no transport retry");
+});
+
+test("D11: no probe during a revalidation, after sign-out, or for another account", async () => {
+  const f = fixture();
+  await yieldLikeTrace(f);
+  const t = probeTimers(f).at(-1);
+  f.run("revalidationPending = true");
+  const n = f.pending.length;
+  fire(t);
+  assert.equal(f.pending.length, n, "nothing is trusted during a revalidation");
+  const g = fixture();
+  await yieldLikeTrace(g);
+  const u = probeTimers(g).at(-1);
+  g.run("teardownSession()");
+  assert.equal(u.cleared, true, "sign-out cancels the probe");
+  const h = fixture();
+  await yieldLikeTrace(h);
+  const v = probeTimers(h).at(-1);
+  h.context.session.value = envelope(jwt(9, 22), "22"); // account switched underneath
+  const m = h.pending.length;
+  fire(v);
+  assert.equal(h.pending.length, m);
+});
+
+test("D11: a holding connection earns the probe budget back; a quick one does not", async () => {
+  const f = fixture();
+  await yieldLikeTrace(f);
+  for (let i = 0; i < 3; i++) { fire(probeTimers(f).at(-1)); f.pending.at(-1)!.resolve(envelope(jwt(1))); await flush(); await displaced(f, 2_000); }
+  assert.equal(probeTimers(f).length, 0, "budget spent");
+  f.run("takeOverConnection()");
+  f.pending.at(-1)!.resolve(envelope(jwt(1))); await flush();
+  f.status(CONNECTED);
+  const stable = live(f).find((t: any) => t.ms === CONFLICT_WINDOW_MS);
+  fire(stable); // held for the whole window
+  assert.equal(f.run("probesUsed"), 0);
+});
+
+// Renewal vs loop (PROD twotab first run, 11:56:32Z): the connected tab's routine cross-tab
+// revalidation re-mints once (server proof, by design); the yielded tab stays yielded. That is one
+// bounded reconnect, not the displacement loop: no further mints follow.
+test("D11: a renewal revalidation in the connected tab is one bounded re-mint; the yielded tab stays yielded", async () => {
+  const Channel = bus();
+  const a = fixture("connected", { channel: Channel });
+  const b = fixture("connected", { channel: Channel });
+  a.status(CONNECTED);
+  await yieldLikeTrace(b);
+  const bMints = b.pending.length;
+  a.run("revalidationPending = true");
+  const resume = a.adopt(jwt(2), "11");
+  assert.equal(a.pending.length, 1, "exactly one re-mint for the proven credential");
+  a.pending[0].resolve(envelope(jwt(2)));
+  await resume;
+  a.status(CONNECTED);
+  b.run("revalidationPending = true");
+  await b.adopt(jwt(2), "11");
+  for (const t of probeTimers(b)) fire(t); // a is live (heartbeat): b must not probe
+  assert.equal(b.pending.length, bMints, "the yielded tab neither re-mints nor probes");
+  assert.equal(b.context.connection.value, "conflict");
+  assert.equal(a.context.connection.value, "connected");
+});
+

@@ -83,7 +83,49 @@ export interface ConnectionConflict {
   /** This tab gave the connection up and has not connected since. */
   yielded(): boolean;
   takeOver(): void;
+  /** An automatic probe: one more quick loss yields again (no extra allowance). */
+  probe(): void;
   reset(): void;
+}
+
+/**
+ * MUYU-161 D11: when both tabs yielded at once (real DEV trace 2026-10-27 11:26Z: the server
+ * accepted two concurrent connections, then closed both), nobody reconnected until the user
+ * clicked "use here". A yielded tab now probes by itself, with a bounded budget and jittered,
+ * growing delays — but never while another tab of the same account (same browser) reports a
+ * live connection, so a settled winner is not displaced.
+ */
+export const PROBE_DELAYS_MS = [6_000, 15_000, 40_000];
+/** Extra random share of each probe delay, so two yielded tabs do not probe in step. */
+export const PROBE_JITTER = 0.6;
+/** A peer tab's "connected" report is trusted this long (it repeats every HEARTBEAT_MS). */
+export const PEER_FRESH_MS = 25_000;
+export const PEER_HEARTBEAT_MS = 10_000;
+
+export interface PeerReport { uid: string; tab: string; state: "connected" | "released" }
+
+export function isPeerReport(value: unknown): value is PeerReport {
+  const v = value as Partial<PeerReport> | null;
+  return !!v && typeof v.uid === "string" && typeof v.tab === "string" &&
+    (v.state === "connected" || v.state === "released");
+}
+
+/** Same-browser tabs of the same account that recently reported a live IM connection. */
+export function peerLiveness(freshMs = PEER_FRESH_MS): {
+  heard(report: PeerReport, now: number): void;
+  othersConnected(uid: string, self: string, now: number): boolean;
+  clear(): void;
+} {
+  const live = new Map<string, { uid: string; at: number }>();
+  return {
+    heard: (report, now) => {
+      if (report.state === "connected") live.set(report.tab, { uid: report.uid, at: now });
+      else live.delete(report.tab);
+    },
+    othersConnected: (uid, self, now) => [...live].some(([tab, seen]) =>
+      tab !== self && seen.uid === uid && now - seen.at < freshMs),
+    clear: () => live.clear(),
+  };
 }
 
 /**
@@ -126,6 +168,7 @@ export function connectionConflict(
     },
     yielded: () => gaveUp,
     takeOver: () => { quickLosses = -takeoverBonus; lastQuickAt = undefined; gaveUp = false; clear(); },
+    probe: () => { quickLosses = limit - 1; lastQuickAt = undefined; gaveUp = false; clear(); },
     reset: () => { quickLosses = 0; lastQuickAt = undefined; gaveUp = false; clear(); },
   };
 }
