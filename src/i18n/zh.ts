@@ -20,6 +20,7 @@ export default {
     connecting: "连接中…",
     disconnected: "未连接",
     authFailed: "身份验证失败",
+    conflict: "已在其他页面使用",
   },
   login: {
     subtitle: "登录以继续",
@@ -169,6 +170,7 @@ export default {
     reconnecting: "正在重连实时连接…",
     disconnected: "实时连接已断开。",
     reconnect: "重连",
+    useHere: "在此使用",
     details: "了解",
   },
   group: {

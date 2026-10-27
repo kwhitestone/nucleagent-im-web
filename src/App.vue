@@ -79,7 +79,7 @@ import EmptyPaths from "./components/EmptyPaths.vue";
 import SystemLine from "./components/SystemLine.vue";
 import { cancelSDKSync, configureSDK, loadMoreConversations, markRead, reconcileAckedConversation, sendAcked } from "./im";
 import { channelKey, useConversationBatch } from "./hiding";
-import { carryPersisted, earlierCursor, mergeMessages, messageKey, remintGuard } from "./history";
+import { carryPersisted, connectionConflict, earlierCursor, mergeMessages, messageKey, remintGuard } from "./history";
 import { AgentDirectory, uncontactedAgents, type DirectoryAgent } from "./agents";
 import { buildOutgoingText, mentionCandidates, mentionsMe } from "./mentions";
 import { throttle, unknownGroup } from "./groupSync";
@@ -158,7 +158,7 @@ function rereadAgentDirectory() {
 // Connection state is a key, not a sentence. It used to hold the English label
 // itself, which both drove `sendMessage`'s guard and rendered in the header —
 // translating it in place would have silently broken the guard.
-type ConnectionState = "connected" | "connecting" | "disconnected" | "authFailed";
+type ConnectionState = "connected" | "connecting" | "disconnected" | "authFailed" | "conflict";
 const connection = ref<ConnectionState>("disconnected");
 // Which rail slot is selected. Purely a list filter; it never touches the SDK.
 type RailMode = "all" | "groups" | "agents";
@@ -734,11 +734,17 @@ function remintWhenOnline(): void {
   }
 }
 
+// MUYU-161 D10: one web IM connection per account. Auth-fails that keep ending freshly
+// re-minted connections mean another tab of this account took the connection; this tab
+// then yields (no re-mint, view kept) and offers "use here" instead of displacing it back.
+const conflict = connectionConflict();
+
 const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
   if (status === ConnectStatus.Connected) {
     connection.value = "connected";
     authRecoveryNeeded = false;
     remint.reset();
+    conflict.connected(Date.now());
     void Promise.all([syncConversations(), syncGroups(), refreshActiveHistory(), batch.refreshHidden()]);
     void openPendingConversation();
     void refreshAgentPresentation();
@@ -746,6 +752,14 @@ const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
   } else if (status === ConnectStatus.Connecting) {
     connection.value = "connecting";
   } else if (status === ConnectStatus.ConnectFail && reasonCode === 2) {
+    if (conflict.authFailed(Date.now())) {
+      // Yield: nothing re-mints by itself (no renewal, `online` or retry timer), so the
+      // other tab keeps the connection. Only the user's explicit takeover re-mints.
+      connection.value = "conflict";
+      authRecoveryNeeded = false;
+      clearTimeout(remintRetryTimer);
+      return;
+    }
     connection.value = "authFailed";
     authRecoveryNeeded = true;
     if (remint.take()) void remintConnectToken();
@@ -753,6 +767,18 @@ const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
     connection.value = "disconnected";
   }
 };
+
+/** The conflict bar's "use here": take the connection back once, with a bounded allowance. */
+function takeOverConnection(): void {
+  if (!session.value || connection.value !== "conflict" || revalidationPending) return;
+  conflict.takeOver();
+  remint.reset();
+  remint.take();
+  remintRetries = 0;
+  authRecoveryNeeded = true;
+  connection.value = "connecting";
+  void remintConnectToken();
+}
 
 const conversationListener: ConversationListener = (conversation, action) => {
   if (action === ConversationAction.remove) {
@@ -1662,6 +1688,7 @@ function teardownSession(): void {
   remintRetries = 0;
   authRecoveryNeeded = false;
   remint.reset();
+  conflict.reset();
   viewGeneration += 1;
   streamAbort?.abort();
   removeListeners();
@@ -1942,6 +1969,7 @@ onBeforeUnmount(() => {
       >
         <span>{{ connection === "connecting" ? t("system.reconnecting") : t(`conn.${connection}`) }}</span>
         <button v-if="connection === 'disconnected'" type="button" @click="reconnectIm">{{ t("system.reconnect") }}</button>
+        <button v-if="connection === 'conflict'" type="button" data-testid="im-conflict-take-over" @click="takeOverConnection">{{ t("system.useHere") }}</button>
       </p>
 
       <div v-show="!searchOpen" class="sidebar-tools">

@@ -64,3 +64,40 @@ export function remintGuard(): { take(): boolean; reset(): void } {
     reset: () => { spent = false; },
   };
 }
+
+/** A connection lost to auth-fail sooner than this after it connected counts as displaced. */
+export const CONFLICT_WINDOW_MS = 30_000;
+/** Consecutive quick losses after which this tab stops re-minting by itself. */
+export const CONFLICT_LIMIT = 2;
+/** Extra quick losses an explicit "use here" absorbs, so the takeover outlasts the other tab. */
+export const CONFLICT_TAKEOVER_BONUS = 2;
+
+/**
+ * MUYU-161 D10: WuKongIM keeps one web connection per account (the IM server registers every
+ * minted token at device level 1), so another tab's mint closes this tab's socket and the old
+ * token then auth-fails. Re-minting on every such auth-fail made two tabs displace each other
+ * forever. An auth-fail that ends a connection which had lived a while (a WuKong reset) still
+ * re-mints exactly as before; only auth-fails that keep ending freshly re-minted connections
+ * are a conflict, and from CONFLICT_LIMIT of them on this tab yields instead of re-minting.
+ */
+export function connectionConflict(
+  windowMs = CONFLICT_WINDOW_MS, limit = CONFLICT_LIMIT, takeoverBonus = CONFLICT_TAKEOVER_BONUS,
+): { connected(now: number): void; authFailed(now: number): boolean; takeOver(): void; reset(): void } {
+  let connectedAt: number | undefined;
+  let quickLosses = 0;
+  return {
+    connected: (now) => { connectedAt = now; },
+    /** True when this auth-fail is a displacement conflict: do not re-mint, yield. */
+    authFailed: (now) => {
+      // Only an auth-fail that ends a connection is counted; another one before any success
+      // is the re-mint guard's business and changes nothing here.
+      if (connectedAt !== undefined) {
+        quickLosses = now - connectedAt < windowMs ? quickLosses + 1 : 0;
+        connectedAt = undefined;
+      }
+      return quickLosses >= limit;
+    },
+    takeOver: () => { quickLosses = -takeoverBonus; connectedAt = undefined; },
+    reset: () => { quickLosses = 0; connectedAt = undefined; },
+  };
+}

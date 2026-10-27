@@ -19,6 +19,7 @@ export default {
     connecting: "Connecting…",
     disconnected: "Disconnected",
     authFailed: "Authentication failed",
+    conflict: "In use in another tab",
   },
   login: {
     subtitle: "Sign in to continue",
@@ -169,6 +170,7 @@ export default {
     reconnecting: "Reconnecting live response…",
     disconnected: "Live connection lost.",
     reconnect: "Reconnect",
+    useHere: "Use here",
     details: "Details",
   },
   group: {

@@ -5,7 +5,7 @@ import test from "node:test";
 import ts from "typescript";
 import { ref } from "vue";
 import { renewsSameUser } from "../src/api.ts";
-import { remintGuard } from "../src/history.ts";
+import { connectionConflict, remintGuard } from "../src/history.ts";
 
 const app = readFileSync(new URL("../src/App.vue", import.meta.url), "utf8");
 const section = (start: string, end: string) => app.slice(app.indexOf(start), app.indexOf(end));
@@ -33,6 +33,9 @@ function fixture(state = "connected") {
     shellAuthGeneration: 1,
     renewsSameUser,
     remintGuard,
+    connectionConflict,
+    clock: 1_000_000,
+    Date: { now: () => context.clock },
     ConnectStatus: { Connected: 1, Connecting: 2, ConnectFail: 3, Disconnect: 0 },
     imSession: ({ accessToken }: { accessToken: string }) => {
       calls.push(`mint:${accessToken}`);
@@ -66,7 +69,7 @@ function fixture(state = "connected") {
   const run = (code: string) => runInNewContext(code, context);
   return {
     context, calls, pending, run,
-    status: (status: number) => run(`connectStatusListener(${status}, 2)`),
+    status: (status: number, reason = 2) => run(`connectStatusListener(${status}, ${reason})`),
     adopt: (token: string, principal?: string | null) =>
       run(`adoptShellSession(${JSON.stringify(token)}${principal === undefined ? "" : ", " + JSON.stringify(principal)})`),
   };
@@ -531,4 +534,125 @@ test("OFFLINE proof pending, then the shell's PROVEN same-user token completes i
   assert.ok(f.calls.includes("connect"));
   assert.ok(f.calls.includes("stream:kept-channel"));
   assert.equal(f.context.draft.value, "unsent draft");
+});
+
+// MUYU-161 D10 (real PROD traces kickdiag-prod / kickdiag-prod2, 2026-10-27 10:14 and 10:18Z):
+// with a second same-account web IM tab, every connect lived ~3.4 s, then CONNACK rc=2 (auth-fail)
+// -> one re-mint -> reconnect -> the other tab's token fails -> it re-mints ... 13 opens / 14 closes
+// in 45 s and 8/8 in 27 s, never settling. A re-mint per auth-fail must not loop like that.
+const CONNECTED = 1, CONNECT_FAIL = 3, DISCONNECT = 0;
+async function displaced(f: ReturnType<typeof fixture>, livedMs: number) {
+  f.status(CONNECTED);
+  f.context.clock += livedMs;
+  f.status(CONNECT_FAIL); // the server dropped this tab's token: CONNACK rc=2 on the reconnect
+  const minted = f.pending.length;
+  f.pending.at(-1)?.resolve(envelope(jwt(1)));
+  await flush();
+  return minted;
+}
+
+test("two-tab displacement (kickdiag trace): this tab stops re-minting after a bounded number of quick losses", async () => {
+  const f = fixture();
+  const mints: number[] = [];
+  for (let i = 0; i < 8; i++) mints.push(await displaced(f, 3_400));
+  assert.equal(f.pending.length, 1, "bounded: the first quick loss still re-mints once, the second yields");
+  assert.deepEqual(mints, [1, 1, 1, 1, 1, 1, 1, 1], "no further mint after yielding (the trace looped every ~7 s)");
+  assert.equal(f.context.connection.value, "conflict");
+  assert.equal(f.run("authRecoveryNeeded"), false, "nothing re-mints by itself while yielding");
+  assert.equal(f.context.draft.value, "unsent draft");
+  assert.equal(f.context.activeChannel.value?.channelID, "kept-channel");
+});
+
+test("yielding: a same-user renewal, `online` and a pending retry timer do not re-mint", async () => {
+  const f = fixture();
+  for (let i = 0; i < 3; i++) await displaced(f, 3_400);
+  const before = f.pending.length;
+  assert.equal(f.context.connection.value, "conflict");
+  await f.adopt(jwt(2)); // routine renewal of the same user
+  f.run("remintWhenOnline()");
+  for (const t of f.context.timers.filter((x: any) => !x.cleared)) t.fn();
+  assert.equal(f.pending.length, before, "the other tab keeps the connection");
+  assert.equal(f.context.session.value.jwt, jwt(2), "the renewal itself is still adopted");
+});
+
+test("explicit 'use here' re-mints once and reconnects; the other tab then yields first", async () => {
+  const f = fixture();
+  for (let i = 0; i < 3; i++) await displaced(f, 3_400);
+  const before = f.pending.length;
+  f.run("takeOverConnection()");
+  assert.equal(f.pending.length, before + 1);
+  assert.equal(f.context.connection.value, "connecting");
+  f.pending.at(-1)!.resolve(envelope(jwt(1)));
+  await flush();
+  assert.ok(f.calls.filter((c) => c === "connect").length >= 1);
+  // The takeover outlasts the other tab: two more quick losses still re-mint here...
+  assert.equal(await displaced(f, 3_400), before + 2);
+  assert.equal(await displaced(f, 3_400), before + 3);
+  // ...but it stays bounded: it yields again rather than looping.
+  for (let i = 0; i < 4; i++) await displaced(f, 3_400);
+  assert.equal(f.context.connection.value, "conflict");
+  assert.ok(f.pending.length <= before + 5);
+});
+
+test("'use here' does nothing unless this tab is yielding, or while a revalidation is pending", () => {
+  const f = fixture();
+  f.run("takeOverConnection()");
+  assert.equal(f.pending.length, 0);
+  f.context.connection.value = "conflict";
+  f.run("revalidationPending = true");
+  f.run("takeOverConnection()");
+  assert.equal(f.pending.length, 0, "nothing is trusted during a revalidation");
+});
+
+test("a WuKong reset (one auth-fail after a long-lived connection) still re-mints every time", async () => {
+  const f = fixture();
+  for (let i = 0; i < 6; i++) await displaced(f, 10 * 60_000);
+  assert.equal(f.pending.length, 6, "long-lived connections are never treated as a conflict");
+  assert.notEqual(f.context.connection.value, "conflict");
+});
+
+test("an auth-fail with no connection in between is the re-mint guard's case, not a conflict", async () => {
+  const f = fixture();
+  f.status(CONNECT_FAIL);
+  f.pending[0].reject(Object.assign(new Error("unauthorized"), { status: 401 }));
+  await flush();
+  f.status(CONNECT_FAIL);
+  f.status(CONNECT_FAIL);
+  assert.equal(f.pending.length, 1, "unchanged: one re-mint per failure streak");
+  assert.equal(f.context.connection.value, "authFailed");
+});
+
+test("plain disconnects (network loss) never count toward a conflict", async () => {
+  const f = fixture();
+  for (let i = 0; i < 6; i++) {
+    f.status(CONNECTED);
+    f.context.clock += 3_000;
+    f.status(DISCONNECT);
+  }
+  assert.equal(f.context.connection.value, "disconnected");
+  f.status(CONNECTED);
+  f.context.clock += 3_000;
+  f.status(CONNECT_FAIL);
+  assert.equal(f.pending.length, 1, "the first auth-fail still re-mints");
+});
+
+test("a stable connection between quick losses resets the count", async () => {
+  const f = fixture();
+  await displaced(f, 3_400);
+  await displaced(f, 5 * 60_000);
+  await displaced(f, 3_400);
+  assert.notEqual(f.context.connection.value, "conflict");
+  assert.equal(f.pending.length, 3);
+});
+
+test("teardown (sign-out / account switch) clears a yielded conflict", async () => {
+  const f = fixture();
+  for (let i = 0; i < 3; i++) await displaced(f, 3_400);
+  assert.equal(f.context.connection.value, "conflict");
+  f.run("teardownSession()");
+  f.context.session.value = envelope(jwt(5));
+  f.status(CONNECTED);
+  f.context.clock += 3_400;
+  f.status(CONNECT_FAIL);
+  assert.equal(f.context.connection.value, "authFailed", "a fresh session starts with no conflict history");
 });

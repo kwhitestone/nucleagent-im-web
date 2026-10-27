@@ -167,3 +167,17 @@ test("history keeps the exact snowflake from message_idstr (the numeric message_
   const m = messageFromRow({ ...row(1, 1), message_id: 2106239242794438656, message_idstr: "2106239242794438656" });
   assert.equal(m.messageID, "2106239242794438656");
 });
+
+test("connection conflict: quick auth-fail losses are bounded; long-lived ones and takeover reset", async () => {
+  const { connectionConflict } = await import("../src/history.ts");
+  const c = connectionConflict(30_000, 2, 2);
+  c.connected(0); assert.equal(c.authFailed(3_000), false);
+  c.connected(3_100); assert.equal(c.authFailed(6_500), true, "second quick loss in a row: yield");
+  assert.equal(c.authFailed(7_000), true, "no connection in between: still yielding");
+  c.takeOver();
+  for (const [at, want] of [[10_000, false], [20_000, false], [30_000, false], [40_000, true]] as const) {
+    c.connected(at - 3_000); assert.equal(c.authFailed(at), want);
+  }
+  c.reset();
+  c.connected(0); assert.equal(c.authFailed(60_000), false, "a long-lived connection is not a conflict");
+});
