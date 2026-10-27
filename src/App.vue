@@ -738,8 +738,8 @@ function remintWhenOnline(): void {
 // re-minted connections mean another tab of this account took the connection; this tab then
 // yields (view kept) and offers "use here" instead of displacing it back. While yielding, a
 // renewal, `online`, a retry timer or the bar's reconnect never re-mint; a cross-tab
-// revalidation re-mints only when the IM server must prove an unproven token (bounded: the
-// next quick loss yields again at once).
+// revalidation re-mints only when the IM server must prove an unproven token (bounded: within
+// the 2 min streak it yields again on the next quick loss, otherwise after another short round).
 const conflict = connectionConflict();
 const monotonicNow = () => performance.now();
 // The last re-mint was refused (401/403): an explicit takeover then shows authFailed.
@@ -1225,6 +1225,7 @@ async function remintOnce(): Promise<void> {
   const current = session.value;
   if (!current) return;
   clearTimeout(remintRetryTimer);
+  remintRefused = false;
   let proofPassed = false;
   try {
     const next = await imSession({ accessToken: current.jwt });

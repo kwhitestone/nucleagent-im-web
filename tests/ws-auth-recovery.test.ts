@@ -777,3 +777,14 @@ test("review: two tabs against a one-connection server settle with exactly one c
   const mints = tabs.reduce((n, t) => n + t.f.pending.length, 0);
   assert.ok(mints <= 3, `bounded mints, got ${mints}`);
 });
+
+test("review 2: a stale refusal does not leak into a later takeover's outcome", async () => {
+  const f = fixture();
+  f.run("remintRefused = true"); // left over from an earlier refused re-mint
+  for (let i = 0; i < 3; i++) await displaced(f, 3_400);
+  f.run("takeOverConnection()");
+  f.run("revalidationPending = true"); // the mint result is fenced by a new revalidation
+  f.pending.at(-1)!.resolve(envelope(jwt(1)));
+  await flush(); await flush();
+  assert.notEqual(f.context.connection.value, "authFailed");
+});
