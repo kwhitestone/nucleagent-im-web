@@ -100,9 +100,10 @@ export interface ConnectionConflict {
  * Limits (bounded): tabs in different browsers (or storage partitions) cannot hear each other;
  * there only the jitter and the budget (PROBE_DELAYS_MS.length probes per streak) bound it, and if their probes keep
  * colliding both end yielded with "use here" offered. The network coming back (`online`) or the
- * tab becoming visible again, at most once per conflict window (30 s), pulls the next probe forward
- * to the first (short) delay; a spent budget starts a new bounded round. Each probe still uses one
- * budget slot: never timer-driven endless probing. A long-lived
+ * tab becoming visible again (at most once per 30 s) pulls the next probe forward to the first
+ * (short) delay at most ONCE per round; a spent budget starts a new round no sooner than the longest
+ * delay after the previous round began. So the probe rate never exceeds an undisturbed round's
+ * (at most PROBE_DELAYS_MS.length per ~5 min) and never becomes timer-driven endless probing. A long-lived
  * winner in the other browser is then interrupted at most once per probe (about 5 s each, at most
  * PROBE_DELAYS_MS.length per streak) and takes the
  * connection back by its ordinary single re-mint. Channel messages carry no credential;

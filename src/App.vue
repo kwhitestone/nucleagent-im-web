@@ -816,6 +816,7 @@ function probeNow(current: NonNullable<typeof session.value>): void {
   // A live peer keeps the connection. Its release (tab closed, signed out) re-arms the probe;
   // if it vanishes silently (crash), look again once its report has gone stale. No budget spent.
   if (peers.othersConnected(current.uid, tabId, monotonicNow())) { scheduleRecheck(); return; }
+  if (probesUsed === 0) roundStartedAt = monotonicNow();
   probesUsed += 1;
   probeState.value = { used: probesUsed, budget: PROBE_DELAYS_MS.length };
   probing = true;
@@ -848,6 +849,9 @@ function returnToConflict(): void {
 // never looked again (PRE r33: the rival left, the network dropped and came back, the tab stayed
 // yielded). The network coming back or the tab becoming visible re-arms the bounded budget.
 let lastRearmAt = -Infinity;
+// Per round: whether online/visible already pulled a probe forward, and when the round began.
+let pulledThisRound = false;
+let roundStartedAt = -Infinity;
 // Probes scheduled so far in this round, mirrored for the connection bar's read-only data attributes
 // (the acceptance harness reads the real budget state instead of inferring it from silence).
 const probeState = ref({ used: 0, budget: PROBE_DELAYS_MS.length });
@@ -856,12 +860,18 @@ function rearmProbe(): void {
   // At most once per conflict window, so switching windows back and forth cannot drive repeated mints.
   const now = monotonicNow();
   if (now - lastRearmAt < CONFLICT_WINDOW_MS) return;
-  lastRearmAt = now;
   // D13: the network coming back or the tab becoming visible means the rival's state is unknown.
-  // A spent budget starts a new bounded round; a round still waiting out a long delay is pulled
-  // forward to the round's FIRST (short) delay for its next probe. Either way the next probe uses
-  // one slot of the per-round budget, so the bound is unchanged.
-  if (probesUsed >= PROBE_DELAYS_MS.length) probesUsed = 0;
+  // A spent budget starts a new bounded round, but no sooner than the longest delay after the last
+  // round began (so the rate never exceeds an undisturbed round's); a round still waiting is pulled
+  // forward to the first (short) delay at most ONCE per round. Each probe uses one budget slot.
+  if (probesUsed >= PROBE_DELAYS_MS.length) {
+    if (now - roundStartedAt < PROBE_DELAYS_MS[PROBE_DELAYS_MS.length - 1]) return;
+    probesUsed = 0;
+    pulledThisRound = false;
+  }
+  if (pulledThisRound) return;
+  lastRearmAt = now;
+  pulledThisRound = true;
   scheduleProbe(PROBE_DELAYS_MS[0]);
 }
 function rearmWhenVisible(): void { if (document.visibilityState === "visible") rearmProbe(); }
@@ -890,7 +900,7 @@ const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
     heartbeat();
     // The probe budget is earned back only by a connection that holds.
     clearTimeout(stableTimer);
-    stableTimer = setTimeout(() => { probesUsed = 0; }, CONFLICT_WINDOW_MS);
+    stableTimer = setTimeout(() => { probesUsed = 0; pulledThisRound = false; roundStartedAt = -Infinity; }, CONFLICT_WINDOW_MS);
     void Promise.all([syncConversations(), syncGroups(), refreshActiveHistory(), batch.refreshHidden()]);
     void openPendingConversation();
     void refreshAgentPresentation();
@@ -1866,6 +1876,9 @@ function teardownSession(): void {
   probing = false;
   remintTransportFailed = false;
   lastRearmAt = -Infinity;
+  pulledThisRound = false;
+  roundStartedAt = -Infinity;
+  probeState.value = { used: 0, budget: PROBE_DELAYS_MS.length };
   peers.clear();
   viewGeneration += 1;
   streamAbort?.abort();

@@ -877,6 +877,8 @@ const probeTimers = (f: ReturnType<typeof fixture>) => { const t = f.run("probeT
 /** Fire the armed probe and, if it asked the channel, the short decision wait that follows. */
 const fireProbe = (f: ReturnType<typeof fixture>) => {
   const t = probeTimers(f).at(-1); if (!t) return false;
+  // Real time passes until the probe is due (rounds have a duration; D13 bounds the round rate by it).
+  if (typeof t.due === "number" && t.due > f.context.clock) f.context.clock = t.due;
   fire(t);
   const q = probeTimers(f).at(-1);
   if (q && (q.ms === PEER_QUERY_WAIT_MS || q.ms === 0)) fire(q);
@@ -1371,7 +1373,7 @@ test("D13: a round still waiting out a long delay is pulled forward on online (s
   assert.equal(f.context.connection.value, "connected");
 });
 
-test("D13: pulling forward keeps the per-round bound (no extra mint beyond the budget)", async () => {
+test("D13: pulling forward keeps the per-round bound (no extra mint beyond the budget) [single round]", async () => {
   const f = fixture();
   await yieldLikeTrace(f);
   let mints = f.pending.length;
@@ -1447,4 +1449,67 @@ test("D12 review: App registers and removes the online / visibility re-arm liste
   assert.match(app, /document\.addEventListener\("visibilitychange", rearmWhenVisible\)/);
   assert.match(app, /window\.removeEventListener\("online", rearmProbe\)/);
   assert.match(app, /document\.removeEventListener\("visibilitychange", rearmWhenVisible\)/);
+});
+
+
+// D13 review follow-ups.
+test("D13 review: one hour of online/visible every 30 s against a rival that keeps winning stays at an undisturbed rate", async () => {
+  const f = fixture();
+  await yieldLikeTrace(f);
+  const t0 = f.context.clock; const start = f.pending.length;
+  while (f.context.clock - t0 < 60 * 60_000) {
+    f.context.clock += 30_000;
+    f.run("rearmProbe()");
+    // let any probe that is due fire (rival takes the connection straight back)
+    for (const t of probeTimers(f)) {
+      if (t.due > f.context.clock) continue;
+      fireProbe(f);
+      const p = f.pending.at(-1) as any;
+      if (p && !p.done) { p.done = true; p.resolve(envelope(jwt(1))); await flush(); await displaced(f, 2_000); }
+    }
+  }
+  const mints = f.pending.length - start;
+  // undisturbed: PROBE_DELAYS_MS.length per round, a round no sooner than every PROBE_DELAYS_MS.at(-1)
+  const cap = Math.ceil((60 * 60_000) / PROBE_DELAYS_MS.at(-1)) * PROBE_DELAYS_MS.length;
+  assert.ok(mints <= cap, `mints/hour ${mints} <= ${cap}`);
+});
+
+test("D13 review: only one pull-forward per round", async () => {
+  const f = fixture();
+  await yieldLikeTrace(f);
+  f.run("rearmProbe()");
+  const first = probeTimers(f)[0];
+  f.context.clock += CONFLICT_WINDOW_MS + 1;
+  f.run("rearmProbe()");
+  assert.equal(probeTimers(f)[0], first, "second pull in the same round is ignored");
+});
+
+test("D13 review: a pulled-forward probe still yields to a live same-browser holder without spending budget", async () => {
+  const C = bus();
+  const f = fixture("connected", { channel: C });
+  await yieldLikeTrace(f);
+  const holder = fixture("connected", { channel: C });
+  holder.status(CONNECTED);
+  const used = f.run("probesUsed"), n = f.pending.length;
+  f.run("rearmProbe()");
+  fireProbe(f);
+  assert.equal(f.pending.length, n);
+  assert.equal(f.run("probesUsed"), used);
+});
+
+test("D13 review: a pulled-forward probe whose session changed meanwhile does nothing", async () => {
+  const f = fixture();
+  await yieldLikeTrace(f);
+  f.run("rearmProbe()");
+  const t = probeTimers(f)[0];
+  f.context.session.value = envelope(jwt(9, 22), "22");
+  const n = f.pending.length;
+  t.fired = true; t.fn();
+  assert.equal(f.pending.length, n);
+});
+
+test("D13 review: the connection bar exposes only the two counters, and only while yielded", () => {
+  const app = readFileSync(new URL("../src/App.vue", import.meta.url), "utf8");
+  assert.match(app, /:data-probes-used="connection === 'conflict' \? probeState\.used : undefined"/);
+  assert.match(app, /:data-probe-budget="connection === 'conflict' \? probeState\.budget : undefined"/);
 });
