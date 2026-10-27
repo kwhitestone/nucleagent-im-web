@@ -728,16 +728,16 @@ test("review: 'use here' refused by the server (401) shows authFailed, not an en
   assert.equal(f.context.connection.value, "authFailed");
 });
 
-test("review: 'use here' failing in transport is retried with the bounded backoff", async () => {
+test("review: 'use here' failing in transport returns to the conflict bar and probes later (D11 review 3 replaced the 2 s retry)", async () => {
   const f = fixture();
   for (let i = 0; i < 3; i++) await displaced(f, 3_400);
   f.run("takeOverConnection()");
   const n = f.pending.length;
   f.pending.at(-1)!.reject(new TypeError("Failed to fetch"));
-  await flush();
-  const retry = f.context.timers.filter((t: any) => !t.cleared).at(-1);
-  assert.equal(retry?.ms, 2000);
-  retry.fn();
+  await flush(); await flush();
+  assert.equal(f.context.connection.value, "conflict");
+  assert.ok(probeTimers(f).length, "a later bounded probe is armed instead");
+  fireProbe(f);
   assert.equal(f.pending.length, n + 1);
 });
 
@@ -1249,4 +1249,29 @@ test("D11 review 2: a refused takeover stops claiming the connection", async () 
   await flush(); await flush();
   assert.equal(f.context.connection.value, "authFailed");
   assert.equal(f.run("probing"), false);
+});
+
+// Review r31 round 3 (SHOULD-FIX 1, 2).
+test("D11 review 3: after a probe's transport failure the tab is truly yielded (a revalidation does not mint)", async () => {
+  const f = fixture();
+  await yieldLikeTrace(f);
+  fireProbe(f);
+  f.pending.at(-1)!.reject(Object.assign(new Error("Bad gateway"), { status: 502 }));
+  await flush(); await flush();
+  const n = f.pending.length;
+  f.run("revalidationPending = true");
+  await f.adopt(jwt(2), "11");
+  assert.equal(f.pending.length, n, "stays yielded: no mint on the revalidation");
+  assert.equal(f.context.connection.value, "conflict");
+});
+
+test("D11 review 3: a takeover that fails in transport returns to the conflict bar and stops claiming", async () => {
+  const f = fixture();
+  await yieldLikeTrace(f);
+  f.run("takeOverConnection()");
+  f.pending.at(-1)!.reject(new TypeError("Failed to fetch"));
+  await flush(); await flush();
+  assert.equal(f.context.connection.value, "conflict");
+  assert.equal(f.run("probing"), false);
+  assert.equal(f.context.timers.filter((t: any) => !t.cleared && t.ms === 2000).length, 0);
 });

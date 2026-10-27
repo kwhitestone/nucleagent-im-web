@@ -827,21 +827,24 @@ function probeNow(current: NonNullable<typeof session.value>): void {
       probing = false;
       probesUsed = PROBE_DELAYS_MS.length;
       connection.value = "authFailed";
-    } else if (probing && remintTransportFailed) {
-      // Transport failure: give the connection back to the bar (still yielded) and probe later.
-      probing = false;
-      clearTimeout(remintRetryTimer);
-      authRecoveryNeeded = false;
-      connection.value = "conflict";
-      scheduleProbe();
-    }
+    } else if (probing && remintTransportFailed) returnToConflict();
   });
+}
+/** A probe or takeover failed in transport (offline, 5xx): back to the yielded bar, probe later. */
+function returnToConflict(): void {
+  probing = false;
+  clearTimeout(remintRetryTimer);
+  authRecoveryNeeded = false;
+  conflict.yieldNow();
+  connection.value = "conflict";
+  scheduleProbe();
 }
 function onPeerMessage(event: MessageEvent): void {
   if (!isPeerReport(event.data) || event.data.tab === tabId) return;
   const uid = session.value?.uid;
   if (event.data.state === "query") {
-    // A probing tab answers too: two yielded tabs of this browser never mint together.
+    // A probing tab answers too: two yielded tabs of this browser never mint together. (If that
+    // probe then fails, the asker merely waits for the report to go stale: a delay, bounded.)
     if (uid === event.data.uid && (connection.value === "connected" || probing)) announce("connected");
     return;
   }
@@ -904,10 +907,11 @@ function takeOverConnection(): void {
   authRecoveryNeeded = true;
   connection.value = "connecting";
   void remintConnectToken().then(() => {
-    if (session.value === current && remintRefused && connection.value === "connecting") {
+    if (session.value !== current || connection.value !== "connecting") return;
+    if (remintRefused) {
       probing = false;
       connection.value = "authFailed";
-    }
+    } else if (probing && remintTransportFailed) returnToConflict();
   });
 }
 
