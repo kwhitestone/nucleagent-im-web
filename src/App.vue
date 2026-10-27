@@ -425,6 +425,9 @@ document.addEventListener("visibilitychange", onVisible);
 window.addEventListener("focus", rereadAgentDirectory);
 window.addEventListener("online", rereadAgentDirectory);
 window.addEventListener("online", remintWhenOnline);
+// Hoisted function declarations (defined with the probe below).
+window.addEventListener("online", rearmProbe);
+document.addEventListener("visibilitychange", rearmWhenVisible);
 // A closing tab releases the connection at once, so a yielded tab can take it over.
 const releaseOnHide = () => { if (holding) announce("released"); holding = false; };
 window.addEventListener("pagehide", releaseOnHide);
@@ -839,6 +842,15 @@ function returnToConflict(): void {
   connection.value = "conflict";
   scheduleProbe();
 }
+// MUYU-161 D12: a yielded tab whose probe budget was spent against a rival in another browser
+// never looked again (PRE r33: the rival left, the network dropped and came back, the tab stayed
+// yielded). The network coming back or the tab becoming visible re-arms the bounded budget.
+function rearmProbe(): void {
+  if (!session.value || connection.value !== "conflict" || revalidationPending) return;
+  probesUsed = 0;
+  scheduleProbe();
+}
+function rearmWhenVisible(): void { if (document.visibilityState === "visible") rearmProbe(); }
 function onPeerMessage(event: MessageEvent): void {
   if (!isPeerReport(event.data) || event.data.tab === tabId) return;
   const uid = session.value?.uid;
@@ -1919,6 +1931,7 @@ function signOut(): void {
 onBeforeUnmount(() => {
   clearTimeout(shellLoginTimer);
   window.removeEventListener("pagehide", releaseOnHide);
+
   peerChannel?.removeEventListener("message", onPeerMessage);
   shellBridge.dispose();
   disposeEmbedHost();
@@ -1927,6 +1940,8 @@ onBeforeUnmount(() => {
   window.removeEventListener("focus", rereadAgentDirectory);
   window.removeEventListener("online", rereadAgentDirectory);
   window.removeEventListener("online", remintWhenOnline);
+  window.removeEventListener("online", rearmProbe);
+  document.removeEventListener("visibilitychange", rearmWhenVisible);
   clearTimeout(remintRetryTimer);
   clearTimeout(pressTimer);
   clearTimeout(locateTimer);

@@ -40,6 +40,8 @@ function fixture(state = "connected", opts: { channel?: unknown; random?: () => 
     connectionConflict, CONFLICT_WINDOW_MS, isPeerReport, PEER_FRESH_MS, PEER_HEARTBEAT_MS, PEER_QUERY_WAIT_MS, peerLiveness,
     PROBE_DELAYS_MS, PROBE_JITTER,
     BroadcastChannel: opts.channel,
+    window: { addEventListener() {}, removeEventListener() {} },
+    document: { visibilityState: "visible", addEventListener() {}, removeEventListener() {} },
     Math: Object.assign(Object.create(Math), { random: opts.random ?? (() => 0.5) }),
     crypto: { randomUUID: () => `tab-${++tabSeq}` },
     clock: 1_000_000,
@@ -1013,7 +1015,7 @@ test("D11: probe delays grow and carry jitter", async () => {
   const delays: number[] = [];
   const f = fixture("connected", { random: () => 1 });
   await yieldLikeTrace(f);
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < PROBE_DELAYS_MS.length; i++) {
     delays.push(probeTimers(f).at(-1).ms); fireProbe(f);
     f.pending.at(-1)!.resolve(envelope(jwt(1))); await flush();
     await displaced(f, 2_000);
@@ -1057,7 +1059,7 @@ test("D11: no probe during a revalidation, after sign-out, or for another accoun
 test("D11: a holding connection earns the probe budget back; a quick one does not", async () => {
   const f = fixture();
   await yieldLikeTrace(f);
-  for (let i = 0; i < 3; i++) { fireProbe(f); f.pending.at(-1)!.resolve(envelope(jwt(1))); await flush(); await displaced(f, 2_000); }
+  for (let i = 0; i < PROBE_DELAYS_MS.length; i++) { fireProbe(f); f.pending.at(-1)!.resolve(envelope(jwt(1))); await flush(); await displaced(f, 2_000); }
   assert.equal(probeTimers(f).length, 0, "budget spent");
   f.run("takeOverConnection()");
   f.pending.at(-1)!.resolve(envelope(jwt(1))); await flush();
@@ -1274,4 +1276,73 @@ test("D11 review 3: a takeover that fails in transport returns to the conflict b
   assert.equal(f.context.connection.value, "conflict");
   assert.equal(f.run("probing"), false);
   assert.equal(f.context.timers.filter((t: any) => !t.cleared && t.ms === 2000).length, 0);
+});
+
+
+// MUYU-161 D12 — real PRE trace acc-pre-r33-fgn (2026-10-27 15:26–15:34Z): a rival in ANOTHER browser
+// (same account) took the connection; the long-window tab yielded, spent its probes while the rival
+// was still there, then the rival left — and the tab never looked again: idle and after a 60 s
+// network drop it stayed "conflict" (recover 120215 ms timeout). Required: bounded re-arm.
+async function spendBudget(f: ReturnType<typeof fixture>) {
+  await yieldLikeTrace(f);
+  for (let i = 0; i < PROBE_DELAYS_MS.length; i++) {
+    if (!fireProbe(f)) break;
+    f.pending.at(-1)!.resolve(envelope(jwt(1))); await flush();
+    await displaced(f, 2_000); // the rival in the other browser takes it straight back
+  }
+  assert.equal(probeTimers(f).length, 0, "budget spent");
+  assert.equal(f.context.connection.value, "conflict");
+}
+
+test("D12 PRE trace: after the budget is spent, the network coming back re-arms the bounded probe", async () => {
+  const f = fixture();
+  await spendBudget(f);
+  const n = f.pending.length;
+  f.run("rearmProbe()"); // window `online`
+  assert.ok(probeTimers(f).length, "re-armed");
+  fireProbe(f);
+  assert.equal(f.pending.length, n + 1, "the rival left: this probe connects");
+  f.pending.at(-1)!.resolve(envelope(jwt(1))); await flush();
+  f.status(CONNECTED);
+  assert.equal(f.context.connection.value, "connected");
+  assert.equal(f.context.draft.value, "unsent draft");
+});
+
+test("D12: the tab becoming visible re-arms; a hidden transition does not", async () => {
+  const f = fixture();
+  await spendBudget(f);
+  f.context.document.visibilityState = "hidden";
+  f.run("rearmWhenVisible()");
+  assert.equal(probeTimers(f).length, 0);
+  f.context.document.visibilityState = "visible";
+  f.run("rearmWhenVisible()");
+  assert.ok(probeTimers(f).length);
+});
+
+test("D12: re-arm does nothing unless yielded, during a revalidation, or signed out", async () => {
+  const f = fixture();
+  f.run("rearmProbe()");
+  assert.equal(probeTimers(f).length, 0, "connected tab: nothing to do");
+  await spendBudget(f);
+  f.run("revalidationPending = true");
+  f.run("rearmProbe()");
+  assert.equal(probeTimers(f).length, 0);
+  f.run("revalidationPending = false");
+  f.run("teardownSession()");
+  f.run("rearmProbe()");
+  assert.equal(probeTimers(f).length, 0);
+});
+
+test("D12: a re-armed budget is still bounded (the rival keeps winning)", async () => {
+  const f = fixture();
+  await spendBudget(f);
+  const n = f.pending.length;
+  f.run("rearmProbe()");
+  for (let i = 0; i < 20; i++) {
+    if (!fireProbe(f)) break;
+    f.pending.at(-1)!.resolve(envelope(jwt(1))); await flush();
+    await displaced(f, 2_000);
+  }
+  assert.equal(f.pending.length - n, PROBE_DELAYS_MS.length, "one more bounded round, no endless probing");
+  assert.equal(probeTimers(f).length, 0);
 });

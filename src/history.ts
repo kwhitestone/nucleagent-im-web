@@ -98,13 +98,17 @@ export interface ConnectionConflict {
  * live connection, so a settled winner is not displaced. Before each probe the tab asks the
  * channel who holds the connection, so a throttled background holder still answers in time.
  * Limits (bounded): tabs in different browsers (or storage partitions) cannot hear each other;
- * there only the jitter and the budget (3 probes per streak) bound it, and if their probes keep
- * colliding both end yielded with "use here" offered. A long-lived winner in the other browser is
- * then interrupted at most once per probe (about 5 s each, at most 3 per streak) and takes the
+ * there only the jitter and the budget (PROBE_DELAYS_MS.length probes per streak) bound it, and if their probes keep
+ * colliding both end yielded with "use here" offered. A spent budget is re-armed only by the
+ * network coming back (`online`) or the tab becoming visible again: the rival's state is then
+ * unknown, and both are rare, user-driven events (no timer-driven endless probing). A long-lived
+ * winner in the other browser is then interrupted at most once per probe (about 5 s each, at most
+ * PROBE_DELAYS_MS.length per streak) and takes the
  * connection back by its ordinary single re-mint. Channel messages carry no credential;
  * a same-origin page could forge them, which only delays or suppresses the automatic probe.
  */
-export const PROBE_DELAYS_MS = [6_000, 15_000, 40_000];
+/** Bounded per streak; the long tail covers a rival in another browser that leaves minutes later. */
+export const PROBE_DELAYS_MS = [6_000, 15_000, 40_000, 120_000, 300_000];
 /** Extra random share of each probe delay, so two yielded tabs do not probe in step. */
 export const PROBE_JITTER = 0.6;
 /** A peer tab's "connected" report is trusted this long (it repeats every HEARTBEAT_MS). */
