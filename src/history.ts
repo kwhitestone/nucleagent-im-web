@@ -94,6 +94,9 @@ export interface ConnectionConflict {
  * re-mints exactly as before; only auth-fails that keep ending freshly re-minted connections,
  * in quick succession, are a conflict, and from CONFLICT_LIMIT of them on this tab yields.
  * Times are monotonic milliseconds (performance.now()).
+ * Known limits (bounded, reviewed): a takeover's allowance only resets on a long-lived loss, so
+ * at worst two extra re-mints; performance.now() may not advance during system sleep, so two
+ * quick losses around a sleep could make a single tab yield — "use here" recovers it.
  */
 export function connectionConflict(
   windowMs = CONFLICT_WINDOW_MS, limit = CONFLICT_LIMIT, takeoverBonus = CONFLICT_TAKEOVER_BONUS,
