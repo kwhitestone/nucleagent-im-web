@@ -735,16 +735,22 @@ function remintWhenOnline(): void {
 }
 
 // MUYU-161 D10: one web IM connection per account. Auth-fails that keep ending freshly
-// re-minted connections mean another tab of this account took the connection; this tab
-// then yields (no re-mint, view kept) and offers "use here" instead of displacing it back.
+// re-minted connections mean another tab of this account took the connection; this tab then
+// yields (view kept) and offers "use here" instead of displacing it back. While yielding, a
+// renewal, `online`, a retry timer or the bar's reconnect never re-mint; a cross-tab
+// revalidation re-mints only when the IM server must prove an unproven token (bounded: the
+// next quick loss yields again at once).
 const conflict = connectionConflict();
+const monotonicNow = () => performance.now();
+// The last re-mint was refused (401/403): an explicit takeover then shows authFailed.
+let remintRefused = false;
 
 const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
   if (status === ConnectStatus.Connected) {
     connection.value = "connected";
     authRecoveryNeeded = false;
     remint.reset();
-    conflict.connected(Date.now());
+    conflict.connected(monotonicNow());
     void Promise.all([syncConversations(), syncGroups(), refreshActiveHistory(), batch.refreshHidden()]);
     void openPendingConversation();
     void refreshAgentPresentation();
@@ -752,9 +758,7 @@ const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
   } else if (status === ConnectStatus.Connecting) {
     connection.value = "connecting";
   } else if (status === ConnectStatus.ConnectFail && reasonCode === 2) {
-    if (conflict.authFailed(Date.now())) {
-      // Yield: nothing re-mints by itself (no renewal, `online` or retry timer), so the
-      // other tab keeps the connection. Only the user's explicit takeover re-mints.
+    if (conflict.authFailed(monotonicNow())) {
       connection.value = "conflict";
       authRecoveryNeeded = false;
       clearTimeout(remintRetryTimer);
@@ -764,20 +768,27 @@ const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
     authRecoveryNeeded = true;
     if (remint.take()) void remintConnectToken();
   } else {
-    connection.value = "disconnected";
+    if (status === ConnectStatus.Disconnect) conflict.lost(monotonicNow());
+    // The refused socket closing after a yield must not turn the bar back into 重连.
+    connection.value = conflict.yielded() ? "conflict" : "disconnected";
   }
 };
 
 /** The conflict bar's "use here": take the connection back once, with a bounded allowance. */
 function takeOverConnection(): void {
-  if (!session.value || connection.value !== "conflict" || revalidationPending) return;
+  const current = session.value;
+  if (!current || connection.value !== "conflict" || revalidationPending) return;
   conflict.takeOver();
   remint.reset();
   remint.take();
   remintRetries = 0;
   authRecoveryNeeded = true;
   connection.value = "connecting";
-  void remintConnectToken();
+  void remintConnectToken().then(() => {
+    if (session.value === current && remintRefused && connection.value === "connecting") {
+      connection.value = "authFailed";
+    }
+  });
 }
 
 const conversationListener: ConversationListener = (conversation, action) => {
@@ -1086,7 +1097,11 @@ async function adoptShellSession(accessToken: string, principal?: string | null)
     // An earlier remint may also have failed with the expired shell credential.
     // Mark a resume as pending recovery so a failed re-mint retries on the next
     // renewal instead of leaving the view stuck (Connected clears it).
-    if (resuming) authRecoveryNeeded = true;
+    // A tab that yielded the connection to another tab stays yielded across a revalidation,
+    // unless the IM server has to prove an unproven token (that needs one mint).
+    const stayYielded = resuming && conflict.yielded() && !serverProof;
+    if (resuming && !stayYielded) authRecoveryNeeded = true;
+    if (stayYielded) connection.value = "conflict";
     if (serverProof) proofUid = session.value.uid;
     remintRetries = 0; // a new credential earns a fresh, still bounded, retry budget
     const resumedUid = session.value.uid;
@@ -1223,6 +1238,7 @@ async function remintOnce(): Promise<void> {
       proofPassed = true;
     }
     remintRetries = 0;
+    remintRefused = false;
     session.value = next;
     WKSDK.shared().disconnect(); // close the refused socket before the SDK opens a new one
     const sdk = configureSDK(next, () => session.value);
@@ -1239,6 +1255,7 @@ async function remintOnce(): Promise<void> {
     const status = (error as { status?: number } | undefined)?.status;
     const refused = status === 401 || status === 403;
     const transport = !refused;
+    if (session.value === current) remintRefused = refused;
     // The server refused the unproven credential (revoked, expired): fail closed.
     if (refused && proofUid !== undefined && session.value === current && !revalidationPending) {
       proofUid = undefined;
@@ -1689,6 +1706,7 @@ function teardownSession(): void {
   authRecoveryNeeded = false;
   remint.reset();
   conflict.reset();
+  remintRefused = false;
   viewGeneration += 1;
   streamAbort?.abort();
   removeListeners();

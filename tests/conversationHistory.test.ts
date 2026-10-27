@@ -73,7 +73,7 @@ function harness() {
       intents = options;
       return { reportAuthRequired() {} };
     },
-    remint: { reset() {} }, conflict: { connected() {}, authFailed: () => false, reset() {} }, syncConversations() {}, syncGroups() {}, refreshActiveHistory() {},
+    remint: { reset() {} }, conflict: { connected() {}, lost() {}, authFailed: () => false, yielded: () => false, reset() {} }, monotonicNow: () => 0, remintRefused: false, syncConversations() {}, syncGroups() {}, refreshActiveHistory() {},
     refreshAgentPresentation() {}, readAgentCapabilities() {},
     batch: { refreshHidden() {} },
   };

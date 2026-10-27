@@ -71,33 +71,58 @@ export const CONFLICT_WINDOW_MS = 30_000;
 export const CONFLICT_LIMIT = 2;
 /** Extra quick losses an explicit "use here" absorbs, so the takeover outlasts the other tab. */
 export const CONFLICT_TAKEOVER_BONUS = 2;
+/** Quick losses further apart than this are unrelated (a displacement loop repeats every ~7 s). */
+export const CONFLICT_STREAK_GAP_MS = 120_000;
+
+export interface ConnectionConflict {
+  connected(now: number): void;
+  /** The socket closed (any reason); a connection's lifetime ends here, not at the later auth-fail. */
+  lost(now: number): void;
+  /** True when this auth-fail is a displacement conflict: do not re-mint, yield. */
+  authFailed(now: number): boolean;
+  /** This tab gave the connection up and has not connected since. */
+  yielded(): boolean;
+  takeOver(): void;
+  reset(): void;
+}
 
 /**
  * MUYU-161 D10: WuKongIM keeps one web connection per account (the IM server registers every
  * minted token at device level 1), so another tab's mint closes this tab's socket and the old
  * token then auth-fails. Re-minting on every such auth-fail made two tabs displace each other
- * forever. An auth-fail that ends a connection which had lived a while (a WuKong reset) still
- * re-mints exactly as before; only auth-fails that keep ending freshly re-minted connections
- * are a conflict, and from CONFLICT_LIMIT of them on this tab yields instead of re-minting.
+ * forever. An auth-fail after a connection that had lived a while (a WuKong reset) still
+ * re-mints exactly as before; only auth-fails that keep ending freshly re-minted connections,
+ * in quick succession, are a conflict, and from CONFLICT_LIMIT of them on this tab yields.
+ * Times are monotonic milliseconds (performance.now()).
  */
 export function connectionConflict(
   windowMs = CONFLICT_WINDOW_MS, limit = CONFLICT_LIMIT, takeoverBonus = CONFLICT_TAKEOVER_BONUS,
-): { connected(now: number): void; authFailed(now: number): boolean; takeOver(): void; reset(): void } {
+  streakGapMs = CONFLICT_STREAK_GAP_MS,
+): ConnectionConflict {
   let connectedAt: number | undefined;
+  let lostAt: number | undefined;
+  let lastQuickAt: number | undefined;
   let quickLosses = 0;
+  let gaveUp = false;
+  const clear = () => { connectedAt = undefined; lostAt = undefined; };
   return {
-    connected: (now) => { connectedAt = now; },
-    /** True when this auth-fail is a displacement conflict: do not re-mint, yield. */
+    connected: (now) => { connectedAt = now; lostAt = undefined; gaveUp = false; },
+    lost: (now) => { if (connectedAt !== undefined && lostAt === undefined) lostAt = now; },
     authFailed: (now) => {
       // Only an auth-fail that ends a connection is counted; another one before any success
       // is the re-mint guard's business and changes nothing here.
       if (connectedAt !== undefined) {
-        quickLosses = now - connectedAt < windowMs ? quickLosses + 1 : 0;
-        connectedAt = undefined;
+        const quick = (lostAt ?? now) - connectedAt < windowMs;
+        const stale = lastQuickAt !== undefined && now - lastQuickAt > streakGapMs;
+        if (!quick || (stale && quickLosses > 0)) quickLosses = 0;
+        if (quick) { quickLosses += 1; lastQuickAt = now; }
+        clear();
       }
-      return quickLosses >= limit;
+      if (quickLosses >= limit) gaveUp = true;
+      return gaveUp;
     },
-    takeOver: () => { quickLosses = -takeoverBonus; connectedAt = undefined; },
-    reset: () => { quickLosses = 0; connectedAt = undefined; },
+    yielded: () => gaveUp,
+    takeOver: () => { quickLosses = -takeoverBonus; lastQuickAt = undefined; gaveUp = false; clear(); },
+    reset: () => { quickLosses = 0; lastQuickAt = undefined; gaveUp = false; clear(); },
   };
 }

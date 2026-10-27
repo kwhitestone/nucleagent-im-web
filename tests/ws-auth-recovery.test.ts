@@ -35,7 +35,7 @@ function fixture(state = "connected") {
     remintGuard,
     connectionConflict,
     clock: 1_000_000,
-    Date: { now: () => context.clock },
+    performance: { now: () => context.clock },
     ConnectStatus: { Connected: 1, Connecting: 2, ConnectFail: 3, Disconnect: 0 },
     imSession: ({ accessToken }: { accessToken: string }) => {
       calls.push(`mint:${accessToken}`);
@@ -536,15 +536,17 @@ test("OFFLINE proof pending, then the shell's PROVEN same-user token completes i
   assert.equal(f.context.draft.value, "unsent draft");
 });
 
+const CONNECTED = 1, CONNECT_FAIL = 3, DISCONNECT = 0;
 // MUYU-161 D10 (real PROD traces kickdiag-prod / kickdiag-prod2, 2026-10-27 10:14 and 10:18Z):
 // with a second same-account web IM tab, every connect lived ~3.4 s, then CONNACK rc=2 (auth-fail)
 // -> one re-mint -> reconnect -> the other tab's token fails -> it re-mints ... 13 opens / 14 closes
 // in 45 s and 8/8 in 27 s, never settling. A re-mint per auth-fail must not loop like that.
-const CONNECTED = 1, CONNECT_FAIL = 3, DISCONNECT = 0;
 async function displaced(f: ReturnType<typeof fixture>, livedMs: number) {
   f.status(CONNECTED);
   f.context.clock += livedMs;
-  f.status(CONNECT_FAIL); // the server dropped this tab's token: CONNACK rc=2 on the reconnect
+  f.status(DISCONNECT, 0); // the server closed this tab's socket (another tab minted)
+  f.context.clock += 3_000; // the SDK's reconnect delay
+  f.status(CONNECT_FAIL); // the old token is no longer registered: CONNACK rc=2
   const minted = f.pending.length;
   f.pending.at(-1)?.resolve(envelope(jwt(1)));
   await flush();
@@ -655,4 +657,123 @@ test("teardown (sign-out / account switch) clears a yielded conflict", async () 
   f.context.clock += 3_400;
   f.status(CONNECT_FAIL);
   assert.equal(f.context.connection.value, "authFailed", "a fresh session starts with no conflict history");
+});
+
+// Independent review (r30) follow-ups.
+test("review: quick losses far apart (days, WuKong rolling restarts) never add up to a conflict", async () => {
+  const f = fixture();
+  await displaced(f, 3_400);            // one odd quick loss
+  f.context.clock += 3 * 86_400_000;    // days later, after many plain reconnects
+  for (let i = 0; i < 3; i++) { f.status(CONNECTED); f.context.clock += 3_000; f.status(DISCONNECT, 0); }
+  await displaced(f, 3_400);            // a WuKong restart right after a network blip
+  assert.notEqual(f.context.connection.value, "conflict");
+  assert.equal(f.pending.length, 2, "it still re-mints");
+});
+
+test("review: a connection's lifetime ends at the socket close, not at the later auth-fail", async () => {
+  const f = fixture();
+  for (let i = 0; i < 2; i++) {
+    f.status(CONNECTED);
+    f.context.clock += 3_400;
+    f.status(DISCONNECT, 0);
+    f.context.clock += 60_000; // a throttled background tab reconnects late
+    f.status(CONNECT_FAIL);
+    f.pending.at(-1)?.resolve(envelope(jwt(1)));
+    await flush();
+  }
+  assert.equal(f.context.connection.value, "conflict", "still a displacement: the connection lived 3.4 s");
+});
+
+test("review: a cross-tab revalidation does not make a yielded tab take the connection back", async () => {
+  const f = fixture();
+  for (let i = 0; i < 3; i++) await displaced(f, 3_400);
+  const before = f.pending.length;
+  f.run("revalidationPending = true");
+  await f.adopt(jwt(2), "11"); // the same user's proven token
+  assert.equal(f.pending.length, before, "no mint: the other tab keeps the connection");
+  assert.equal(f.context.connection.value, "conflict");
+  assert.equal(f.run("revalidationPending"), false);
+  assert.equal(f.context.session.value.jwt, jwt(2));
+  assert.equal(f.context.draft.value, "unsent draft");
+});
+
+test("review: a yielded tab whose unproven token needs the IM server's proof still asks once (fail-closed kept)", async () => {
+  onlineState = false;
+  const f = fixture();
+  for (let i = 0; i < 3; i++) await displaced(f, 3_400);
+  const before = f.pending.length;
+  f.run("revalidationPending = true");
+  const resume = f.adopt(jwt(2), null);
+  assert.equal(f.pending.length, before + 1, "the proof needs one mint");
+  f.pending.at(-1)!.reject(Object.assign(new Error("unauthorized"), { status: 401 }));
+  await resume;
+  assert.ok(f.calls.includes("signed-out"), "a refused proof still signs out");
+  onlineState = true;
+});
+
+test("review: 'use here' refused by the server (401) shows authFailed, not an endless 正在重连", async () => {
+  const f = fixture();
+  for (let i = 0; i < 3; i++) await displaced(f, 3_400);
+  f.run("takeOverConnection()");
+  f.pending.at(-1)!.reject(Object.assign(new Error("unauthorized"), { status: 401 }));
+  await flush(); await flush();
+  assert.equal(f.context.connection.value, "authFailed");
+});
+
+test("review: 'use here' failing in transport is retried with the bounded backoff", async () => {
+  const f = fixture();
+  for (let i = 0; i < 3; i++) await displaced(f, 3_400);
+  f.run("takeOverConnection()");
+  const n = f.pending.length;
+  f.pending.at(-1)!.reject(new TypeError("Failed to fetch"));
+  await flush();
+  const retry = f.context.timers.filter((t: any) => !t.cleared).at(-1);
+  assert.equal(retry?.ms, 2000);
+  retry.fn();
+  assert.equal(f.pending.length, n + 1);
+});
+
+test("review: the yielded tab's socket close keeps the conflict bar (not 重连)", async () => {
+  const f = fixture();
+  for (let i = 0; i < 3; i++) await displaced(f, 3_400);
+  f.status(DISCONNECT, 0);
+  assert.equal(f.context.connection.value, "conflict");
+});
+
+// Two tabs running this code against one server that keeps only the newest token.
+test("review: two tabs against a one-connection server settle with exactly one connected", async () => {
+  const server = { owner: "" };
+  const tabs = ["A", "B"].map((name) => ({ name, f: fixture() }));
+  const connect = async (tab: typeof tabs[number]) => {
+    const other = tabs.find((t) => t !== tab)!;
+    server.owner = tab.name;
+    tab.f.status(CONNECTED);
+    // The other tab, if connected, is closed by the server and its reconnect auth-fails.
+    if (other.f.context.connection.value === "connected") {
+      other.f.context.clock += 3_400;
+      other.f.status(DISCONNECT, 0);
+      other.f.context.clock += 3_000;
+      other.f.status(CONNECT_FAIL);
+    }
+  };
+  for (const t of tabs) t.f.context.clock = 1_000_000;
+  await connect(tabs[0]);
+  await connect(tabs[1]);
+  for (let round = 0; round < 12; round++) {
+    let progressed = false;
+    for (const t of tabs) {
+      if (t.f.pending.length && !t.f.pending.at(-1)!.done) {
+        const p = t.f.pending.at(-1)! as any; p.done = true;
+        p.resolve(envelope(jwt(1)));
+        await flush();
+        await connect(t);
+        progressed = true;
+      }
+    }
+    if (!progressed) break;
+  }
+  const states = tabs.map((t) => t.f.context.connection.value).sort();
+  assert.deepEqual(states, ["conflict", "connected"]);
+  const mints = tabs.reduce((n, t) => n + t.f.pending.length, 0);
+  assert.ok(mints <= 3, `bounded mints, got ${mints}`);
 });
