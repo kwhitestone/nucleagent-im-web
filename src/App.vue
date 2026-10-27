@@ -795,11 +795,12 @@ function scheduleRecheck(): void {
   clearTimeout(probeTimer);
   probeTimer = setTimeout(() => { if (connection.value === "conflict") scheduleProbe(); }, PEER_FRESH_MS);
 }
-function scheduleProbe(): void {
+function scheduleProbe(baseDelay?: number): void {
   clearTimeout(probeTimer);
+  probeState.value = { used: probesUsed, budget: PROBE_DELAYS_MS.length };
   if (probesUsed >= PROBE_DELAYS_MS.length) return;
   const current = session.value;
-  const delay = PROBE_DELAYS_MS[probesUsed] * (1 + Math.random() * PROBE_JITTER);
+  const delay = (baseDelay ?? PROBE_DELAYS_MS[probesUsed]) * (1 + Math.random() * PROBE_JITTER);
   probeTimer = setTimeout(() => {
     if (!current || session.value !== current) return;
     if (revalidationPending || connection.value !== "conflict" ||
@@ -816,6 +817,7 @@ function probeNow(current: NonNullable<typeof session.value>): void {
   // if it vanishes silently (crash), look again once its report has gone stale. No budget spent.
   if (peers.othersConnected(current.uid, tabId, monotonicNow())) { scheduleRecheck(); return; }
   probesUsed += 1;
+  probeState.value = { used: probesUsed, budget: PROBE_DELAYS_MS.length };
   probing = true;
   conflict.probe();
   remint.reset();
@@ -846,16 +848,21 @@ function returnToConflict(): void {
 // never looked again (PRE r33: the rival left, the network dropped and came back, the tab stayed
 // yielded). The network coming back or the tab becoming visible re-arms the bounded budget.
 let lastRearmAt = -Infinity;
+// Probes scheduled so far in this round, mirrored for the connection bar's read-only data attributes
+// (the acceptance harness reads the real budget state instead of inferring it from silence).
+const probeState = ref({ used: 0, budget: PROBE_DELAYS_MS.length });
 function rearmProbe(): void {
   if (!session.value || connection.value !== "conflict" || revalidationPending) return;
-  // Only a SPENT budget is re-armed (a running round keeps its own schedule), and at most once
-  // per conflict window, so switching windows back and forth cannot drive repeated mints.
-  if (probesUsed < PROBE_DELAYS_MS.length) return;
+  // At most once per conflict window, so switching windows back and forth cannot drive repeated mints.
   const now = monotonicNow();
   if (now - lastRearmAt < CONFLICT_WINDOW_MS) return;
   lastRearmAt = now;
-  probesUsed = 0;
-  scheduleProbe();
+  // D13: the network coming back or the tab becoming visible means the rival's state is unknown.
+  // A spent budget starts a new bounded round; a round still waiting out a long delay is pulled
+  // forward to the round's FIRST (short) delay for its next probe. Either way the next probe uses
+  // one slot of the per-round budget, so the bound is unchanged.
+  if (probesUsed >= PROBE_DELAYS_MS.length) probesUsed = 0;
+  scheduleProbe(PROBE_DELAYS_MS[0]);
 }
 function rearmWhenVisible(): void { if (document.visibilityState === "visible") rearmProbe(); }
 function onPeerMessage(event: MessageEvent): void {
@@ -2143,6 +2150,8 @@ onBeforeUnmount(() => {
         :class="connection === 'connecting' ? 'warn' : 'err'"
         role="status"
         data-testid="im-connbar"
+        :data-probes-used="connection === 'conflict' ? probeState.used : undefined"
+        :data-probe-budget="connection === 'conflict' ? probeState.budget : undefined"
       >
         <span>{{ connection === "connecting" ? t("system.reconnecting") : t(`conn.${connection}`) }}</span>
         <button v-if="connection === 'disconnected'" type="button" @click="reconnectIm">{{ t("system.reconnect") }}</button>

@@ -57,7 +57,7 @@ function fixture() {
   const ctx: Record<string, any> = {
     session: ref(envelope(jwt(1))), connection: ref("connected"), draft: ref("unsent draft"),
     activeChannel: ref({ channelID: "kept-channel" }), shellAuthGeneration: 1, renewsSameUser,
-    ...history, clock: 1_000_000, crypto: { randomUUID: () => "tab-under-test" },
+    ...history, ref, clock: 1_000_000, crypto: { randomUUID: () => "tab-under-test" },
     Math: Object.assign(Object.create(Math), { random: () => 0.5 }),
     performance: { now: () => ctx.clock }, Date: { now: () => ctx.clock },
     BroadcastChannel: undefined, window: win, document: doc,
@@ -144,4 +144,39 @@ test("D12 replay (external events only): repeated visibility flips stay bounded 
   await f.advance(30 * 60_000, "rival-holds");
   assert.ok(f.pending.length - before <= history.PROBE_DELAYS_MS.length, `bounded: ${f.pending.length - before}`);
   assert.equal(f.ctx.connection.value, "conflict");
+});
+
+
+// D13 — the real PRE xbrowser trace of 2026-10-27 21:35–22:01Z: the network came back while the
+// round was STILL waiting out its last (300 s+) delay (4 of 5 probes used): nothing happened for 600 s.
+async function preTraceLongDelay() {
+  const f = fixture();
+  for (let i = 0; i < 2; i++) {
+    f.status(CONNECTED); f.ctx.clock += 2_000; f.status(DISCONNECT, 0); f.ctx.clock += 3_000; f.status(CONNECT_FAIL);
+    (f.pending.at(-1) as any)?.resolve(envelope(jwt(1))); await flush();
+  }
+  // Run the rival-holds phase only until 4 probes are used (read the real counter).
+  for (let i = 0; i < 60 && runInNewContext("probesUsed", f.ctx) < history.PROBE_DELAYS_MS.length - 1; i++) {
+    await f.advance(30_000, "rival-holds");
+  }
+  assert.equal(runInNewContext("probesUsed", f.ctx), history.PROBE_DELAYS_MS.length - 1, "budget not spent: in the long tail");
+  assert.equal(f.ctx.connection.value, "conflict");
+  return f;
+}
+
+test("D13 replay (external events only): network back during the long tail -> recovers within ~10 s", async () => {
+  const f = await preTraceLongDelay();
+  f.setOnline(false); f.win.dispatch("offline"); f.ctx.clock += 60_000;
+  f.setOnline(true); f.win.dispatch("online");
+  await f.advance(15_000, "free");
+  assert.equal(f.ctx.connection.value, "connected", "pulled forward; PRE xbrowser 21:49Z stayed 冲突 for 600 s");
+  assert.equal(f.ctx.draft.value, "unsent draft");
+});
+
+test("D13 replay (external events only): tab visible again during the long tail -> recovers within ~10 s", async () => {
+  const f = await preTraceLongDelay();
+  f.doc.visibilityState = "hidden"; f.doc.dispatch("visibilitychange");
+  f.doc.visibilityState = "visible"; f.doc.dispatch("visibilitychange");
+  await f.advance(15_000, "free");
+  assert.equal(f.ctx.connection.value, "connected");
 });

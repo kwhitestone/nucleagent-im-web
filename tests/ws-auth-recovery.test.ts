@@ -37,7 +37,7 @@ function fixture(state = "connected", opts: { channel?: unknown; random?: () => 
     shellAuthGeneration: 1,
     renewsSameUser,
     remintGuard,
-    connectionConflict, CONFLICT_WINDOW_MS, isPeerReport, PEER_FRESH_MS, PEER_HEARTBEAT_MS, PEER_QUERY_WAIT_MS, peerLiveness,
+    ref, connectionConflict, CONFLICT_WINDOW_MS, isPeerReport, PEER_FRESH_MS, PEER_HEARTBEAT_MS, PEER_QUERY_WAIT_MS, peerLiveness,
     PROBE_DELAYS_MS, PROBE_JITTER,
     BroadcastChannel: opts.channel,
     window: { addEventListener() {}, removeEventListener() {} },
@@ -1350,12 +1350,43 @@ test("D12: a re-armed budget is still bounded (the rival keeps winning)", async 
 
 
 // D12 review follow-ups.
-test("D12 review: re-arm only once the budget is spent; a running round keeps its schedule", async () => {
+test("D13: a round still waiting out a long delay is pulled forward on online (superseded D12 'spent only')", async () => {
   const f = fixture();
   await yieldLikeTrace(f);
-  const armed = probeTimers(f)[0];
-  f.run("rearmProbe()");
-  assert.equal(probeTimers(f)[0], armed, "partial budget: no reset of the armed probe");
+  // Spend 4 of 5 probes against a rival that keeps winning; the 5th is armed with the longest delay.
+  for (let i = 0; i < PROBE_DELAYS_MS.length - 1; i++) { fireProbe(f); f.pending.at(-1)!.resolve(envelope(jwt(1))); await flush(); await displaced(f, 2_000); }
+  assert.equal(f.run("probesUsed"), PROBE_DELAYS_MS.length - 1, "budget NOT spent (read directly)");
+  assert.equal(f.run("probeState.value.used"), PROBE_DELAYS_MS.length - 1, "the bar's read-only state agrees");
+  const longOne = probeTimers(f)[0];
+  assert.ok(longOne.ms >= PROBE_DELAYS_MS.at(-1), `armed long delay ${longOne.ms}`);
+  f.run("rearmProbe()"); // window online
+  const pulled = probeTimers(f)[0];
+  assert.ok(pulled && pulled !== longOne && pulled.ms <= PROBE_DELAYS_MS[0] * (1 + PROBE_JITTER), `pulled forward to ${pulled?.ms}`);
+  const n = f.pending.length;
+  fireProbe(f);
+  assert.equal(f.pending.length, n + 1, "the rival left: the pulled-forward probe mints");
+  assert.equal(f.run("probesUsed"), PROBE_DELAYS_MS.length, "it used the last budget slot: bound unchanged");
+  f.pending.at(-1)!.resolve(envelope(jwt(1))); await flush();
+  f.status(CONNECTED);
+  assert.equal(f.context.connection.value, "connected");
+});
+
+test("D13: pulling forward keeps the per-round bound (no extra mint beyond the budget)", async () => {
+  const f = fixture();
+  await yieldLikeTrace(f);
+  let mints = f.pending.length;
+  for (let i = 0; i < 20; i++) {
+    f.context.clock += CONFLICT_WINDOW_MS + 1; // throttle window passes every time
+    f.run("rearmProbe()");
+    if (!fireProbe(f)) break;
+    if (f.pending.length === mints) break;
+    mints = f.pending.length;
+    f.pending.at(-1)!.resolve(envelope(jwt(1))); await flush();
+    await displaced(f, 2_000);
+    if (f.run("probesUsed") >= PROBE_DELAYS_MS.length) break;
+  }
+  assert.ok(f.run("probesUsed") <= PROBE_DELAYS_MS.length);
+  assert.ok(f.pending.length - 1 <= PROBE_DELAYS_MS.length, `bounded per round: ${f.pending.length - 1}`);
 });
 
 test("D12 review: repeated visibility flips re-arm at most once per conflict window", async () => {

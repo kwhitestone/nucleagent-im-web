@@ -73,7 +73,7 @@ function harness() {
       intents = options;
       return { reportAuthRequired() {} };
     },
-    remint: { reset() {} }, conflict: { connected() {}, lost() {}, authFailed: () => false, yielded: () => false, reset() {} }, monotonicNow: () => 0, remintRefused: false, leaveConnected() {}, heartbeat() {}, scheduleProbe() {}, probing: false, probeTimer: undefined, stableTimer: undefined, probesUsed: 0, CONFLICT_WINDOW_MS: 30000, syncConversations() {}, syncGroups() {}, refreshActiveHistory() {},
+    remint: { reset() {} }, conflict: { connected() {}, lost() {}, authFailed: () => false, yielded: () => false, reset() {} }, monotonicNow: () => 0, remintRefused: false, leaveConnected() {}, heartbeat() {}, scheduleProbe() {}, probing: false, probeState: { value: { used: 0, budget: 5 } }, probeTimer: undefined, stableTimer: undefined, probesUsed: 0, CONFLICT_WINDOW_MS: 30000, syncConversations() {}, syncGroups() {}, refreshActiveHistory() {},
     refreshAgentPresentation() {}, readAgentCapabilities() {},
     batch: { refreshHidden() {} },
   };
