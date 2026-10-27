@@ -93,7 +93,12 @@ export interface ConnectionConflict {
  * accepted two concurrent connections, then closed both), nobody reconnected until the user
  * clicked "use here". A yielded tab now probes by itself, with a bounded budget and jittered,
  * growing delays — but never while another tab of the same account (same browser) reports a
- * live connection, so a settled winner is not displaced.
+ * live connection, so a settled winner is not displaced. Before each probe the tab asks the
+ * channel who holds the connection, so a throttled background holder still answers in time.
+ * Limits (bounded): tabs in different browsers (or storage partitions) cannot hear each other;
+ * there only the jitter and the budget (3 probes per streak) bound it, and if their probes keep
+ * colliding both end yielded with "use here" offered. Channel messages carry no credential;
+ * a same-origin page could forge them, which only delays or suppresses the automatic probe.
  */
 export const PROBE_DELAYS_MS = [6_000, 15_000, 40_000];
 /** Extra random share of each probe delay, so two yielded tabs do not probe in step. */
@@ -102,25 +107,30 @@ export const PROBE_JITTER = 0.6;
 export const PEER_FRESH_MS = 25_000;
 export const PEER_HEARTBEAT_MS = 10_000;
 
-export interface PeerReport { uid: string; tab: string; state: "connected" | "released" }
+/** "query": a yielded tab asks who holds the connection; live holders answer at once (not throttled). */
+export interface PeerReport { uid: string; tab: string; state: "connected" | "released" | "query" }
+/** How long a probing tab waits for live holders to answer its query. */
+export const PEER_QUERY_WAIT_MS = 1_500;
 
 export function isPeerReport(value: unknown): value is PeerReport {
   const v = value as Partial<PeerReport> | null;
   return !!v && typeof v.uid === "string" && typeof v.tab === "string" &&
-    (v.state === "connected" || v.state === "released");
+    (v.state === "connected" || v.state === "released" || v.state === "query");
 }
 
 /** Same-browser tabs of the same account that recently reported a live IM connection. */
 export function peerLiveness(freshMs = PEER_FRESH_MS): {
-  heard(report: PeerReport, now: number): void;
+  /** Records a report; true when it released a tab that was live (a real hand-over). */
+  heard(report: PeerReport, now: number): boolean;
   othersConnected(uid: string, self: string, now: number): boolean;
   clear(): void;
 } {
   const live = new Map<string, { uid: string; at: number }>();
   return {
     heard: (report, now) => {
-      if (report.state === "connected") live.set(report.tab, { uid: report.uid, at: now });
-      else live.delete(report.tab);
+      if (report.state === "connected") { live.set(report.tab, { uid: report.uid, at: now }); return false; }
+      if (report.state === "released") return live.delete(report.tab);
+      return false;
     },
     othersConnected: (uid, self, now) => [...live].some(([tab, seen]) =>
       tab !== self && seen.uid === uid && now - seen.at < freshMs),

@@ -81,7 +81,7 @@ import { cancelSDKSync, configureSDK, loadMoreConversations, markRead, reconcile
 import { channelKey, useConversationBatch } from "./hiding";
 import {
   carryPersisted, CONFLICT_WINDOW_MS, connectionConflict, earlierCursor, isPeerReport, mergeMessages, messageKey,
-  PEER_FRESH_MS, PEER_HEARTBEAT_MS, peerLiveness, PROBE_DELAYS_MS, PROBE_JITTER, remintGuard,
+  PEER_FRESH_MS, PEER_HEARTBEAT_MS, PEER_QUERY_WAIT_MS, peerLiveness, PROBE_DELAYS_MS, PROBE_JITTER, remintGuard,
 } from "./history";
 import { AgentDirectory, uncontactedAgents, type DirectoryAgent } from "./agents";
 import { buildOutgoingText, mentionCandidates, mentionsMe } from "./mentions";
@@ -426,7 +426,7 @@ window.addEventListener("focus", rereadAgentDirectory);
 window.addEventListener("online", rereadAgentDirectory);
 window.addEventListener("online", remintWhenOnline);
 // A closing tab releases the connection at once, so a yielded tab can take it over.
-const releaseOnHide = () => { if (connection.value === "connected") announce("released"); };
+const releaseOnHide = () => { if (holding) announce("released"); holding = false; };
 window.addEventListener("pagehide", releaseOnHide);
 
 /** UIDs of every agent this account has seen, so the rail can filter by them. */
@@ -762,7 +762,9 @@ let probeTimer: ReturnType<typeof setTimeout> | undefined;
 let probesUsed = 0;
 let stableTimer: ReturnType<typeof setTimeout> | undefined;
 let heartbeatTimer: ReturnType<typeof setTimeout> | undefined;
-function announce(state: "connected" | "released"): void {
+// This tab announced a live connection that it has not released yet.
+let holding = false;
+function announce(state: "connected" | "released" | "query"): void {
   const uid = session.value?.uid;
   if (!uid || !peerChannel) return;
   try { peerChannel.postMessage({ uid, tab: tabId, state }); } catch { /* closed channel */ }
@@ -770,14 +772,17 @@ function announce(state: "connected" | "released"): void {
 function heartbeat(): void {
   clearTimeout(heartbeatTimer);
   if (connection.value !== "connected") return;
+  holding = true;
   announce("connected");
   heartbeatTimer = setTimeout(heartbeat, PEER_HEARTBEAT_MS);
 }
 function leaveConnected(): void {
   clearTimeout(heartbeatTimer);
   clearTimeout(stableTimer);
-  announce("released");
+  if (holding) announce("released");
+  holding = false;
 }
+/** Look again later without spending budget (live peer, offline, revalidation in progress). */
 function scheduleRecheck(): void {
   clearTimeout(probeTimer);
   probeTimer = setTimeout(() => { if (connection.value === "conflict") scheduleProbe(); }, PEER_FRESH_MS);
@@ -788,27 +793,46 @@ function scheduleProbe(): void {
   const current = session.value;
   const delay = PROBE_DELAYS_MS[probesUsed] * (1 + Math.random() * PROBE_JITTER);
   probeTimer = setTimeout(() => {
-    if (session.value !== current || !current || connection.value !== "conflict" || revalidationPending) return;
-    // A live peer keeps the connection. Its release (tab closed, signed out) re-arms the probe;
-    // if it vanishes silently (crash), look again once its report has gone stale. No budget spent.
-    if (peers.othersConnected(current.uid, tabId, monotonicNow())) { scheduleRecheck(); return; }
-    probesUsed += 1;
-    conflict.probe();
-    remint.reset();
-    remint.take();
-    remintRetries = 0;
-    authRecoveryNeeded = true;
-    connection.value = "connecting";
-    void remintConnectToken();
+    if (!current || session.value !== current) return;
+    if (revalidationPending || connection.value !== "conflict" ||
+      (typeof navigator !== "undefined" && navigator.onLine === false)) { scheduleRecheck(); return; }
+    // Ask who holds the connection; a live holder answers at once even if its own timers are
+    // throttled in the background. Decide after a short wait.
+    announce("query");
+    probeTimer = setTimeout(() => probeNow(current), peerChannel ? PEER_QUERY_WAIT_MS : 0);
   }, delay);
 }
-peerChannel?.addEventListener("message", (event: MessageEvent) => {
+function probeNow(current: NonNullable<typeof session.value>): void {
+  if (session.value !== current || connection.value !== "conflict" || revalidationPending) return;
+  // A live peer keeps the connection. Its release (tab closed, signed out) re-arms the probe;
+  // if it vanishes silently (crash), look again once its report has gone stale. No budget spent.
+  if (peers.othersConnected(current.uid, tabId, monotonicNow())) { scheduleRecheck(); return; }
+  probesUsed += 1;
+  conflict.probe();
+  remint.reset();
+  remint.take();
+  remintRetries = 0;
+  authRecoveryNeeded = true;
+  connection.value = "connecting";
+  void remintConnectToken().then(() => {
+    // Refused (401/403): stop probing and say so; the next renewal or a sign-in decides.
+    if (session.value === current && remintRefused && connection.value === "connecting") {
+      probesUsed = PROBE_DELAYS_MS.length;
+      connection.value = "authFailed";
+    }
+  });
+}
+function onPeerMessage(event: MessageEvent): void {
   if (!isPeerReport(event.data) || event.data.tab === tabId) return;
-  peers.heard(event.data, monotonicNow());
-  if (event.data.state === "released" && connection.value === "conflict" && session.value?.uid === event.data.uid) {
-    scheduleProbe();
+  const uid = session.value?.uid;
+  if (event.data.state === "query") {
+    if (uid === event.data.uid && connection.value === "connected") announce("connected");
+    return;
   }
-});
+  const handedOver = peers.heard(event.data, monotonicNow());
+  if (handedOver && connection.value === "conflict" && uid === event.data.uid) scheduleProbe();
+}
+peerChannel?.addEventListener("message", onPeerMessage);
 
 const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
   if (status === ConnectStatus.Connected) {
@@ -1175,7 +1199,7 @@ async function adoptShellSession(accessToken: string, principal?: string | null)
     // unless the IM server has to prove an unproven token (that needs one mint).
     const stayYielded = resuming && conflict.yielded() && !serverProof;
     if (resuming && !stayYielded) authRecoveryNeeded = true;
-    if (stayYielded) connection.value = "conflict";
+    if (stayYielded) { connection.value = "conflict"; if (!authRecoveryNeeded) scheduleProbe(); }
     if (serverProof) proofUid = session.value.uid;
     remintRetries = 0; // a new credential earns a fresh, still bounded, retry budget
     const resumedUid = session.value.uid;
@@ -1865,6 +1889,7 @@ function signOut(): void {
 onBeforeUnmount(() => {
   clearTimeout(shellLoginTimer);
   window.removeEventListener("pagehide", releaseOnHide);
+  peerChannel?.removeEventListener("message", onPeerMessage);
   shellBridge.dispose();
   disposeEmbedHost();
   document.removeEventListener("keydown", onKeydown);
@@ -1876,6 +1901,7 @@ onBeforeUnmount(() => {
   clearTimeout(pressTimer);
   clearTimeout(locateTimer);
   teardownSession();
+  peerChannel?.close();
 });
 </script>
 
