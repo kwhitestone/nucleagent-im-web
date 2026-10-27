@@ -750,6 +750,8 @@ const conflict = connectionConflict();
 const monotonicNow = () => performance.now();
 // The last re-mint was refused (401/403): an explicit takeover then shows authFailed.
 let remintRefused = false;
+// The last re-mint failed in transport (offline, 5xx): a probe then returns to the conflict bar.
+let remintTransportFailed = false;
 
 // MUYU-161 D11: a yielded tab probes by itself (bounded, jittered, growing delays) unless another
 // tab of this account in this browser reports a live connection; that tab keeps it. Tabs of other
@@ -764,6 +766,9 @@ let stableTimer: ReturnType<typeof setTimeout> | undefined;
 let heartbeatTimer: ReturnType<typeof setTimeout> | undefined;
 // This tab announced a live connection that it has not released yet.
 let holding = false;
+// An automatic probe (or "use here") is between its mint and its first connect: an auth-fail now
+// means another tab took the connection first, so this tab yields again (no extra mint).
+let probing = false;
 function announce(state: "connected" | "released" | "query"): void {
   const uid = session.value?.uid;
   if (!uid || !peerChannel) return;
@@ -808,6 +813,7 @@ function probeNow(current: NonNullable<typeof session.value>): void {
   // if it vanishes silently (crash), look again once its report has gone stale. No budget spent.
   if (peers.othersConnected(current.uid, tabId, monotonicNow())) { scheduleRecheck(); return; }
   probesUsed += 1;
+  probing = true;
   conflict.probe();
   remint.reset();
   remint.take();
@@ -815,10 +821,19 @@ function probeNow(current: NonNullable<typeof session.value>): void {
   authRecoveryNeeded = true;
   connection.value = "connecting";
   void remintConnectToken().then(() => {
+    if (session.value !== current || connection.value !== "connecting") return;
     // Refused (401/403): stop probing and say so; the next renewal or a sign-in decides.
-    if (session.value === current && remintRefused && connection.value === "connecting") {
+    if (remintRefused) {
+      probing = false;
       probesUsed = PROBE_DELAYS_MS.length;
       connection.value = "authFailed";
+    } else if (probing && remintTransportFailed) {
+      // Transport failure: give the connection back to the bar (still yielded) and probe later.
+      probing = false;
+      clearTimeout(remintRetryTimer);
+      authRecoveryNeeded = false;
+      connection.value = "conflict";
+      scheduleProbe();
     }
   });
 }
@@ -826,7 +841,8 @@ function onPeerMessage(event: MessageEvent): void {
   if (!isPeerReport(event.data) || event.data.tab === tabId) return;
   const uid = session.value?.uid;
   if (event.data.state === "query") {
-    if (uid === event.data.uid && connection.value === "connected") announce("connected");
+    // A probing tab answers too: two yielded tabs of this browser never mint together.
+    if (uid === event.data.uid && (connection.value === "connected" || probing)) announce("connected");
     return;
   }
   const handedOver = peers.heard(event.data, monotonicNow());
@@ -840,6 +856,7 @@ const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
     authRecoveryNeeded = false;
     remint.reset();
     conflict.connected(monotonicNow());
+    probing = false;
     clearTimeout(probeTimer);
     heartbeat();
     // The probe budget is earned back only by a connection that holds.
@@ -853,7 +870,10 @@ const connectStatusListener: ConnectStatusListener = (status, reasonCode) => {
     connection.value = "connecting";
   } else if (status === ConnectStatus.ConnectFail && reasonCode === 2) {
     leaveConnected();
-    if (conflict.authFailed(monotonicNow())) {
+    const lostProbe = probing;
+    probing = false;
+    if (conflict.authFailed(monotonicNow()) || lostProbe) {
+      conflict.yieldNow();
       connection.value = "conflict";
       authRecoveryNeeded = false;
       clearTimeout(remintRetryTimer);
@@ -876,6 +896,7 @@ function takeOverConnection(): void {
   const current = session.value;
   if (!current || connection.value !== "conflict" || revalidationPending) return;
   clearTimeout(probeTimer);
+  probing = true;
   conflict.takeOver();
   remint.reset();
   remint.take();
@@ -884,6 +905,7 @@ function takeOverConnection(): void {
   connection.value = "connecting";
   void remintConnectToken().then(() => {
     if (session.value === current && remintRefused && connection.value === "connecting") {
+      probing = false;
       connection.value = "authFailed";
     }
   });
@@ -1324,6 +1346,7 @@ async function remintOnce(): Promise<void> {
   if (!current) return;
   clearTimeout(remintRetryTimer);
   remintRefused = false;
+  remintTransportFailed = false;
   let proofPassed = false;
   try {
     const next = await imSession({ accessToken: current.jwt });
@@ -1355,6 +1378,7 @@ async function remintOnce(): Promise<void> {
     const refused = status === 401 || status === 403;
     const transport = !refused;
     if (session.value === current) remintRefused = refused;
+    if (session.value === current) remintTransportFailed = transport;
     // The server refused the unproven credential (revoked, expired): fail closed.
     if (refused && proofUid !== undefined && session.value === current && !revalidationPending) {
       proofUid = undefined;
@@ -1809,6 +1833,8 @@ function teardownSession(): void {
   leaveConnected();
   clearTimeout(probeTimer);
   probesUsed = 0;
+  probing = false;
+  remintTransportFailed = false;
   peers.clear();
   viewGeneration += 1;
   streamAbort?.abort();

@@ -1191,3 +1191,62 @@ test("D11 review: cross-browser, server closes both on concurrent connects: boun
     assert.ok(mints <= 4 * PROBE_DELAYS_MS.length, `bounded: ${mints}`);
   }
 });
+
+// Review r31 round 2.
+test("D11 review 2: a probe whose fresh token is displaced BEFORE it connects yields again (conflict + re-armed), not authFailed", async () => {
+  const f = fixture();
+  await yieldLikeTrace(f);
+  fireProbe(f);
+  f.pending.at(-1)!.resolve(envelope(jwt(1)));
+  await flush();
+  f.status(CONNECT_FAIL); // the other tab's mint won the race: rc=2 before any Connected
+  assert.equal(f.context.connection.value, "conflict");
+  assert.ok(probeTimers(f).length, "probe re-armed (budget permitting)");
+  assert.ok(f.context.draft.value === "unsent draft");
+});
+
+test("D11 review 2: 'use here' displaced before it connects returns to conflict with the button", async () => {
+  const f = fixture();
+  await yieldLikeTrace(f);
+  f.run("takeOverConnection()");
+  f.pending.at(-1)!.resolve(envelope(jwt(1)));
+  await flush();
+  f.status(CONNECT_FAIL);
+  assert.equal(f.context.connection.value, "conflict");
+});
+
+test("D11 review 2: a tab that is probing answers queries, so two yielded tabs of one browser never mint together", async () => {
+  const C = bus();
+  const a = fixture("connected", { channel: C, random: () => 0 });
+  const b = fixture("connected", { channel: C, random: () => 0 });
+  await yieldLikeTrace(a);
+  await yieldLikeTrace(b);
+  // a's probe decides first and mints; b's query arrives while a is still minting.
+  fire(probeTimers(a).at(-1)); fire(probeTimers(a).at(-1));
+  assert.equal(a.run("probing"), true);
+  const n = b.pending.length;
+  fireProbe(b);
+  assert.equal(b.pending.length, n, "b sees a as holding and does not mint");
+});
+
+test("D11 review 2: a probe that fails in transport (5xx) returns to the conflict bar and probes later", async () => {
+  const f = fixture();
+  await yieldLikeTrace(f);
+  fireProbe(f);
+  f.pending.at(-1)!.reject(Object.assign(new Error("Bad gateway"), { status: 502 }));
+  await flush(); await flush();
+  assert.equal(f.context.connection.value, "conflict");
+  assert.equal(f.run("probing"), false);
+  assert.ok(probeTimers(f).length, "next probe armed");
+  assert.equal(f.context.timers.filter((t: any) => !t.cleared && t.ms === 2000).length, 0, "no parallel transport retry");
+});
+
+test("D11 review 2: a refused takeover stops claiming the connection", async () => {
+  const f = fixture();
+  await yieldLikeTrace(f);
+  f.run("takeOverConnection()");
+  f.pending.at(-1)!.reject(Object.assign(new Error("unauthorized"), { status: 401 }));
+  await flush(); await flush();
+  assert.equal(f.context.connection.value, "authFailed");
+  assert.equal(f.run("probing"), false);
+});

@@ -85,6 +85,8 @@ export interface ConnectionConflict {
   takeOver(): void;
   /** An automatic probe: one more quick loss yields again (no extra allowance). */
   probe(): void;
+  /** Yield at once (a probe or takeover lost the race before it connected). */
+  yieldNow(): void;
   reset(): void;
 }
 
@@ -97,7 +99,9 @@ export interface ConnectionConflict {
  * channel who holds the connection, so a throttled background holder still answers in time.
  * Limits (bounded): tabs in different browsers (or storage partitions) cannot hear each other;
  * there only the jitter and the budget (3 probes per streak) bound it, and if their probes keep
- * colliding both end yielded with "use here" offered. Channel messages carry no credential;
+ * colliding both end yielded with "use here" offered. A long-lived winner in the other browser is
+ * then interrupted at most once per probe (about 5 s each, at most 3 per streak) and takes the
+ * connection back by its ordinary single re-mint. Channel messages carry no credential;
  * a same-origin page could forge them, which only delays or suppresses the automatic probe.
  */
 export const PROBE_DELAYS_MS = [6_000, 15_000, 40_000];
@@ -179,6 +183,7 @@ export function connectionConflict(
     yielded: () => gaveUp,
     takeOver: () => { quickLosses = -takeoverBonus; lastQuickAt = undefined; gaveUp = false; clear(); },
     probe: () => { quickLosses = limit - 1; lastQuickAt = undefined; gaveUp = false; clear(); },
+    yieldNow: () => { gaveUp = true; clear(); },
     reset: () => { quickLosses = 0; lastQuickAt = undefined; gaveUp = false; clear(); },
   };
 }
