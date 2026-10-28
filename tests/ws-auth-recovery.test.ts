@@ -1591,3 +1591,25 @@ test("an account switch still voids an armed probe", async () => {
   t.fired = true; t.fn();
   assert.equal(f.pending.length, n);
 });
+
+
+// Review MUST-FIX: the probe's/takeover's outcome handling must also survive a same-user renewal.
+for (const [what, start] of [["probe", "probe"], ["takeover", "takeover"]] as const) {
+  for (const outcome of ["refused", "transport"] as const) {
+    test(`${what} whose mint fails (${outcome}) after a same-user renewal still settles (no stuck 'connecting')`, async () => {
+      const f = fixture();
+      await yieldLikeTrace(f);
+      if (start === "probe") fireProbe(f); else f.run("takeOverConnection()");
+      const n = f.pending.length;
+      const renewal = f.adopt(jwt(8)); // renewal while the probe's mint is in flight (it may start its own mint)
+      await flush();
+      const err = () => outcome === "refused" ? Object.assign(new Error("unauthorized"), { status: 401 }) : new TypeError("Failed to fetch");
+      for (const p of f.pending.slice(n - 1)) p.reject(err()); // every in-flight mint fails the same way
+      await renewal;
+      await flush(); await flush();
+      assert.notEqual(f.context.connection.value, "connecting", "not stuck reconnecting");
+      assert.equal(f.run("probing"), false);
+      assert.equal(f.context.connection.value, outcome === "refused" ? "authFailed" : "conflict");
+    });
+  }
+}

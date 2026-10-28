@@ -831,7 +831,7 @@ function probeNow(current: NonNullable<typeof session.value>): void {
   authRecoveryNeeded = true;
   connection.value = "connecting";
   void remintConnectToken().then(() => {
-    if (session.value !== current || connection.value !== "connecting") return;
+    if (!sameAccount(current) || connection.value !== "connecting") return;
     // Refused (401/403): stop probing and say so; the next renewal or a sign-in decides.
     if (remintRefused) {
       probing = false;
@@ -964,7 +964,7 @@ function takeOverConnection(): void {
   authRecoveryNeeded = true;
   connection.value = "connecting";
   void remintConnectToken().then(() => {
-    if (session.value !== current || connection.value !== "connecting") return;
+    if (!sameAccount(current) || connection.value !== "connecting") return;
     if (remintRefused) {
       probing = false;
       connection.value = "authFailed";
