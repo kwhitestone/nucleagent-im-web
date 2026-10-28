@@ -1567,3 +1567,27 @@ test("D13 NIT1: a deferred new round that comes due during a revalidation is ret
   fireProbe(f);
   assert.equal(f.pending.length, n + 1, "the new round probes by itself");
 });
+
+
+// MUYU-161 real PRE xbrowser trace r23 (2026-10-28 00:36:50-01:04Z): the 5th probe was armed; a routine
+// same-user refresh at 00:39:43 replaced the session object; the probe timer compared by identity and
+// silently gave up; the tab stayed yielded with budget 4/5 through online/visible (pulled already used).
+test("renewal while a probe is armed does not void the probe (same account)", async () => {
+  const f = fixture();
+  await yieldLikeTrace(f);
+  const n = f.pending.length;
+  await f.adopt(jwt(7)); // routine same-user renewal (new jwt => new session object)
+  assert.equal(f.context.session.value.uid, "11");
+  fireProbe(f);
+  assert.equal(f.pending.length, n + 1, "the armed probe still mints after the renewal");
+});
+
+test("an account switch still voids an armed probe", async () => {
+  const f = fixture();
+  await yieldLikeTrace(f);
+  const t = probeTimers(f)[0];
+  f.context.session.value = envelope(jwt(9, 22), "22");
+  const n = f.pending.length;
+  t.fired = true; t.fn();
+  assert.equal(f.pending.length, n);
+});

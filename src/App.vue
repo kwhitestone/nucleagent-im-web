@@ -791,6 +791,10 @@ function leaveConnected(): void {
   holding = false;
 }
 /** Look again later without spending budget (live peer, offline, revalidation in progress). */
+// A routine same-user renewal replaces the session object (new jwt); a pending probe must survive it
+// (PRE xbrowser r23: renewal at 00:39:43 silently voided the armed 5th probe, the tab stayed yielded).
+// Only a sign-out or another account ends it.
+const sameAccount = (s: typeof session.value) => !!s && !!session.value && session.value.uid === s.uid;
 function scheduleRecheck(): void {
   clearTimeout(probeTimer);
   probeTimer = setTimeout(() => { if (connection.value === "conflict") scheduleProbe(); }, PEER_FRESH_MS);
@@ -802,7 +806,7 @@ function scheduleProbe(baseDelay?: number): void {
   const current = session.value;
   const delay = (baseDelay ?? PROBE_DELAYS_MS[probesUsed]) * (1 + Math.random() * PROBE_JITTER);
   probeTimer = setTimeout(() => {
-    if (!current || session.value !== current) return;
+    if (!current || !sameAccount(current)) return;
     if (revalidationPending || connection.value !== "conflict" ||
       (typeof navigator !== "undefined" && navigator.onLine === false)) { scheduleRecheck(); return; }
     // Ask who holds the connection; a live holder answers at once even if its own timers are
@@ -812,7 +816,7 @@ function scheduleProbe(baseDelay?: number): void {
   }, delay);
 }
 function probeNow(current: NonNullable<typeof session.value>): void {
-  if (session.value !== current || connection.value !== "conflict" || revalidationPending) return;
+  if (!sameAccount(current) || connection.value !== "conflict" || revalidationPending) return;
   // A live peer keeps the connection. Its release (tab closed, signed out) re-arms the probe;
   // if it vanishes silently (crash), look again once its report has gone stale. No budget spent.
   if (peers.othersConnected(current.uid, tabId, monotonicNow())) { scheduleRecheck(); return; }
