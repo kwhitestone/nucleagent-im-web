@@ -21,7 +21,7 @@ onBeforeUnmount(() => { dialog.value?.close(); previousFocus?.focus?.(); });
 </template>
 
 <style scoped>
-.management-overlay { position: fixed; inset: 0 0 0 auto; box-sizing: border-box; margin: 0; padding: 0; width: min(1120px, 96vw); max-width: 100%; height: 100dvh; max-height: 100dvh; overflow-y: auto; border: 0; background: var(--bg, #f8fafc); color: var(--text-primary, #0f172a); }
+.management-overlay { position: fixed; inset: 0 0 0 auto; box-sizing: border-box; margin: 0; padding: 0; width: min(1120px, 96vw); max-width: 100%; height: 100dvh; max-height: 100dvh; overflow-y: auto; border: 0; background: var(--bg, var(--bg-page)); color: var(--text-primary, #0f172a); }
 .management-overlay::backdrop { background: rgb(15 23 42 / .35); }
 @media (max-width: 600px) { .management-overlay { width: 100%; } }
 </style>

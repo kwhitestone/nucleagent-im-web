@@ -23,6 +23,7 @@
      因此旧样式无需改写即可继续工作。
    ============================================================ */
 
+@import url("./fonts/index.css");
 :root {
   --moyu-blue: #3072ff;
   --moyu-aqua-300: #85ecff;
@@ -135,6 +136,9 @@
   --r-full: 999px;
   --r-card: 20px;
   --r-hero: 24px;
+  --page-title-size: 20px;
+  --page-title-weight: 500;
+  --page-title-line-height: 30px;
   --sidebar-w: 258px;
   --sidebar-collapsed-w: 64px;
   --topbar-h: 64px;
@@ -229,6 +233,12 @@
 [data-ui-style="d"] {
   --r-card: 8px;
   --r-hero: 8px;
+  --page-title-size: 28px;
+  --page-title-weight: 700;
+  --page-title-line-height: 40px;
+}
+@media (max-width: 639px) {
+  [data-ui-style="d"] { --page-title-size: 20px; --page-title-line-height: 30px; }
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html { font-size: 14px; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }

@@ -96,10 +96,10 @@ onUnmounted(() => {
 <style scoped>
 .agent-effective { padding: 16px 0; border-block: 1px solid var(--border); color: var(--text-primary, CanvasText); min-width: 0; }
 header { display: flex; align-items: center; justify-content: space-between; gap: 12px; } h2 { font-size: 16px; margin: 0; } h3 { font-size: 14px; }
-button { width: 44px; height: 44px; display: grid; place-items: center; background: transparent; color: inherit; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
-button:focus-visible { outline: 2px solid var(--accent, #16796c); outline-offset: 2px; }
+button { width: 44px; height: 44px; display: grid; place-items: center; background: transparent; color: inherit; border: 1px solid var(--border); border-radius: 0px; cursor: pointer; }
+button:focus-visible { outline: 2px solid var(--accent, var(--fg-success)); outline-offset: 2px; }
 .versions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); gap: 24px; }
 dl { display: grid; grid-template-columns: minmax(85px, 1fr) minmax(0, 2fr); gap: 10px; font-size: 12px; }
 dt { color: var(--text-secondary, GrayText); } dd { margin: 0; } dd span { display: block; }
-p, dd, code { overflow-wrap: anywhere; } p { font-size: 13px; }
+p, dd, code { overflow-wrap: anywhere; } p { font-size: 12px; }
 </style>

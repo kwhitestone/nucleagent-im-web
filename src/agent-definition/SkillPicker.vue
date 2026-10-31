@@ -76,12 +76,12 @@ async function toggleList() { open.value = !open.value; if (open.value) { await 
 .skill-picker { display: grid; gap: 10px; }
 .skill-chips, .skill-options { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
 .skill-chip { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 10px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg-card); box-shadow: var(--shadow-xs); animation: scale-in .4s var(--ease-spring) both; max-width: 100%; }
-.chip-icon { display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--r-sm); background: var(--grad-teal-indigo); color: #fff; flex-shrink: 0; }
-.chip-copy { display: grid; min-width: 0; } .chip-copy strong { font-size: 13px; } small { font-size: 11.5px; color: var(--text-secondary); overflow-wrap: anywhere; }
-button { display: inline-flex; align-items: center; gap: 6px; font: inherit; color: inherit; cursor: pointer; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--r-md); transition: all .2s var(--ease); }
+.chip-icon { display: grid; place-items: center; width: 24px; height: 24px; border-radius: var(--r-sm); background: var(--grad-teal-indigo); color: var(--fg-inverse); flex-shrink: 0; }
+.chip-copy { display: grid; min-width: 0; } .chip-copy strong { font-size: 12px; } small { font-size: 12px; color: var(--text-secondary); overflow-wrap: anywhere; }
+button { display: inline-flex; align-items: center; gap: 6px; font: inherit; color: inherit; cursor: pointer; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--r-md); transition: color var(--mo-t-state), background-color var(--mo-t-state), border-color var(--mo-t-state), box-shadow var(--mo-t-state), opacity var(--mo-t-state), transform var(--mo-t-state); }
 .chip-remove { width: 32px; height: 32px; justify-content: center; border: 0; background: transparent; color: var(--text-tertiary); }
 .chip-remove:hover { color: var(--rose-500); background: var(--bg-hover); }
-.add-skill { justify-self: start; min-height: 40px; padding: 6px 12px; font-size: 12.5px; border-style: dashed; color: var(--accent); }
+.add-skill { justify-self: start; min-height: 40px; padding: 6px 12px; font-size: 12px; border-style: dashed; color: var(--accent); }
 .add-skill:hover { border-color: var(--accent); background: var(--teal-50); }
 .skill-popover { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--bg-card); box-shadow: var(--shadow-lg); padding: 10px; animation: scale-in .4s var(--ease-spring) both; transform-origin: top left; }
 .skill-search { display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-md); margin-bottom: 8px; }
@@ -91,7 +91,7 @@ button { display: inline-flex; align-items: center; gap: 6px; font: inherit; col
 .skill-option:hover { background: var(--bg-hover); } .skill-option.off { opacity: .55; cursor: not-allowed; }
 .skill-option span { display: grid; min-width: 0; }
 .skill-option input { width: 18px; height: 18px; accent-color: var(--accent); flex-shrink: 0; }
-.skill-empty { display: flex; align-items: center; gap: 8px; color: var(--text-tertiary); font-size: 13px; margin: 0; padding: 8px 0; }
+.skill-empty { display: flex; align-items: center; gap: 8px; color: var(--text-tertiary); font-size: 12px; margin: 0; padding: 8px 0; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 @media (max-width: 600px) { input { font-size: 16px !important; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }

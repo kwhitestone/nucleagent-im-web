@@ -25,7 +25,7 @@ const { controls, update, touched, display, label } = useDefinitionFields(props,
 <style scoped>
 .definition-fields { display: grid; gap: 16px; min-width: 0; }
 .definition-field { display: grid; gap: 6px; min-width: 0; }
-label { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; font-weight: 600; font-size: 13px; color: var(--text-primary); }
+label { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; font-weight: 500; font-size: 12px; color: var(--text-primary); }
 code, small { font-size: 12px; font-weight: 400; overflow-wrap: anywhere; color: var(--text-secondary); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .definition-error { color: var(--rose-500); }
